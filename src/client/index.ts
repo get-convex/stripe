@@ -196,6 +196,10 @@ export class StripeSubscriptions {
 
   /**
    * Create a new Stripe customer.
+   * 
+   * @param args.idempotencyKey - Optional key to prevent duplicate customer creation.
+   *   If two requests come in with the same key, Stripe returns the same customer.
+   *   Recommended: pass `userId` to prevent race conditions.
    */
   async createCustomer(
     ctx: ActionCtx,
@@ -203,15 +207,21 @@ export class StripeSubscriptions {
       email?: string;
       name?: string;
       metadata?: Record<string, string>;
+      idempotencyKey?: string;
     }
   ) {
     const stripe = new StripeSDK(this.apiKey);
+
+    // Use idempotency key to prevent duplicate customers from race conditions
+    const requestOptions = args.idempotencyKey 
+      ? { idempotencyKey: `create_customer_${args.idempotencyKey}` }
+      : undefined;
 
     const customer = await stripe.customers.create({
       email: args.email,
       name: args.name,
       metadata: args.metadata,
-    });
+    }, requestOptions);
 
     // Store in our database
     await ctx.runMutation(this.component.public.createOrUpdateCustomer, {
@@ -258,11 +268,12 @@ export class StripeSubscriptions {
       return { customerId: existingPayments[0].stripeCustomerId, isNew: false };
     }
 
-    // Create a new customer
+    // Create a new customer with idempotency key to prevent race conditions
     const result = await this.createCustomer(ctx, {
       email: args.email,
       name: args.name,
       metadata: { userId: args.userId },
+      idempotencyKey: args.userId, // Prevents duplicate customers if called concurrently
     });
 
     return { customerId: result.customerId, isNew: true };
