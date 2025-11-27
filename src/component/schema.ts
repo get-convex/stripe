@@ -62,6 +62,7 @@ export default defineSchema({
   })
     .index("by_stripe_invoice_id", ["stripeInvoiceId"])
     .index("by_stripe_customer_id", ["stripeCustomerId"])
+    .index("by_stripe_subscription_id", ["stripeSubscriptionId"])
     .index("by_org_id", ["orgId"])
     .index("by_user_id", ["userId"]),
 });

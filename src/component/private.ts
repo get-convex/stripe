@@ -106,12 +106,12 @@ export const handleSubscriptionCreated = mutation({
             )
             .unique();
 
-        if (!existing) {
-            // Extract orgId and userId from metadata if present
-            const metadata = args.metadata || {};
-            const orgId = metadata.orgId as string | undefined;
-            const userId = metadata.userId as string | undefined;
+        // Extract orgId and userId from metadata if present
+        const metadata = args.metadata || {};
+        const orgId = metadata.orgId as string | undefined;
+        const userId = metadata.userId as string | undefined;
 
+        if (!existing) {
             await ctx.db.insert("subscriptions", {
                 stripeSubscriptionId: args.stripeSubscriptionId,
                 stripeCustomerId: args.stripeCustomerId,
@@ -124,6 +124,26 @@ export const handleSubscriptionCreated = mutation({
                 orgId: orgId,
                 userId: userId,
             });
+        }
+
+        // Backfill any invoices that were created before this subscription
+        // (fixes webhook timing issues where invoice arrives before subscription)
+        if (orgId || userId) {
+            const invoices = await ctx.db
+                .query("invoices")
+                .withIndex("by_stripe_subscription_id", (q) =>
+                    q.eq("stripeSubscriptionId", args.stripeSubscriptionId)
+                )
+                .collect();
+
+            for (const invoice of invoices) {
+                if (!invoice.orgId || !invoice.userId) {
+                    await ctx.db.patch(invoice._id, {
+                        ...(orgId && !invoice.orgId && { orgId }),
+                        ...(userId && !invoice.userId && { userId }),
+                    });
+                }
+            }
         }
 
         return null;
