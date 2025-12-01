@@ -1,10 +1,10 @@
 {
-  "name": "@convex/stripe",
+  "name": "@convex-dev/stripe",
   "description": "A stripe component for Convex.",
-  "repository": "github:michaelshimeles",
-  "homepage": "https://github.com/michaelshimeles#readme",
+  "repository": "github:get-convex/stripe",
+  "homepage": "https://github.com/get-convex/stripe#readme",
   "bugs": {
-    "url": "https://github.com/michaelshimeles/issues"
+    "url": "https://github.com/get-convex/stripe/issues"
   },
   "version": "0.1.0",
   "license": "Apache-2.0",

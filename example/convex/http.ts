@@ -1,7 +1,6 @@
 import { httpRouter } from "convex/server";
-import type Stripe from "stripe";
 import { components } from "./_generated/api";
-import { registerRoutes } from "@convex/stripe";
+import { registerRoutes } from "@convex-dev/stripe";
 
 const http = httpRouter();
 
@@ -10,10 +9,7 @@ const http = httpRouter();
 registerRoutes(http, components.stripe, {
   webhookPath: "/stripe/webhook",
   events: {
-    "customer.subscription.updated": async (
-      ctx: any,
-      event: Stripe.CustomerSubscriptionUpdatedEvent
-    ) => {
+    "customer.subscription.updated": async (ctx, event) => {
       // Example custom handler: Log subscription updates
       const subscription = event.data.object;
       console.log("🔔 Custom handler: Subscription updated!", {
@@ -24,10 +20,7 @@ registerRoutes(http, components.stripe, {
       // You can run additional logic here after the default database sync
       // For example, send a notification, update other tables, etc.
     },
-    "payment_intent.succeeded": async (
-      ctx: any,
-      event: Stripe.PaymentIntentSucceededEvent
-    ) => {
+    "payment_intent.succeeded": async (ctx, event) => {
       // Example custom handler: Log successful one-time payments
       const paymentIntent = event.data.object;
       console.log("💰 Custom handler: Payment succeeded!", {
@@ -36,7 +29,7 @@ registerRoutes(http, components.stripe, {
       });
     },
   },
-  onEvent: async (ctx: any, event: Stripe.Event) => {
+  onEvent: async (ctx, event) => {
     // Log all events for monitoring/debugging
     console.log(`📊 Event received: ${event.type}`, {
       id: event.id,

@@ -333,10 +333,10 @@ export class StripeSubscriptions {
  * export default http;
  * ```
  */
-export function registerRoutes(
+export function registerRoutes<Ctx extends ActionCtx = ActionCtx>(
   http: HttpRouter,
   component: ComponentApi,
-  config?: RegisterRoutesConfig
+  config?: RegisterRoutesConfig<Ctx>,
 ) {
   const webhookPath = config?.webhookPath ?? "/stripe/webhook";
   const eventHandlers = config?.events ?? {};

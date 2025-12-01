@@ -1,13 +1,13 @@
 /**
  * Benji's Store - Stripe Integration
- * 
- * This file demonstrates how to use the @convex/stripe component
+ *
+ * This file demonstrates how to use the @convex-dev/stripe component
  * for handling payments and subscriptions with Clerk authentication.
  */
 
 import { action, mutation, query } from "./_generated/server";
 import { components } from "./_generated/api";
-import { StripeSubscriptions } from "@convex/stripe";
+import { StripeSubscriptions } from "@convex-dev/stripe";
 import { v } from "convex/values";
 
 const stripeClient = new StripeSubscriptions(components.stripe, {});
