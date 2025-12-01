@@ -1,8 +1,8 @@
-# @convex/stripe
+# @convex-dev/stripe
 
 A Convex component for integrating Stripe payments, subscriptions, and billing into your Convex application.
 
-[![npm version](https://badge.fury.io/js/@convex%2Fstripe.svg)](https://badge.fury.io/js/@convex%2Fstripe)
+[![npm version](https://badge.fury.io/js/@convex-dev%2Fstripe.svg)](https://badge.fury.io/js/@convex-dev%2Fstripe)
 
 ## Features
 
@@ -20,7 +20,7 @@ A Convex component for integrating Stripe payments, subscriptions, and billing i
 ### 1. Install the Component
 
 ```bash
-npm install @convex/stripe
+npm install @convex-dev/stripe
 ```
 
 ### 2. Add to Your Convex App
@@ -29,7 +29,7 @@ Create or update `convex/convex.config.ts`:
 
 ```typescript
 import { defineApp } from "convex/server";
-import stripe from "@convex/stripe/convex.config.js";
+import stripe from "@convex-dev/stripe/convex.config.js";
 
 const app = defineApp();
 app.use(stripe);
@@ -56,18 +56,18 @@ Add these to your [Convex Dashboard](https://dashboard.convex.dev) → Settings 
    ```
    (Find your deployment name in the Convex dashboard - it's the part before `.convex.cloud` in your URL)
 4. Select these events:
+   - `checkout.session.completed`
    - `customer.created`
    - `customer.updated`
    - `customer.subscription.created`
    - `customer.subscription.updated`
    - `customer.subscription.deleted`
-   - `payment_intent.succeeded`
-   - `payment_intent.payment_failed`
    - `invoice.created`
    - `invoice.finalized`
    - `invoice.paid`
    - `invoice.payment_failed`
-   - `checkout.session.completed`
+   - `payment_intent.succeeded`
+   - `payment_intent.payment_failed`
 5. Click **"Add endpoint"**
 6. Copy the **Signing secret** and add it as `STRIPE_WEBHOOK_SECRET` in Convex
 
@@ -78,7 +78,7 @@ Create `convex/http.ts`:
 ```typescript
 import { httpRouter } from "convex/server";
 import { components } from "./_generated/api";
-import { registerRoutes } from "@convex/stripe";
+import { registerRoutes } from "@convex-dev/stripe";
 
 const http = httpRouter();
 
@@ -97,7 +97,7 @@ Create `convex/stripe.ts`:
 ```typescript
 import { action } from "./_generated/server";
 import { components } from "./_generated/api";
-import { StripeSubscriptions } from "@convex/stripe";
+import { StripeSubscriptions } from "@convex-dev/stripe";
 import { v } from "convex/values";
 
 const stripeClient = new StripeSubscriptions(components.stripe, {});
@@ -166,7 +166,7 @@ export const createPaymentCheckout = action({
 ### StripeSubscriptions Client
 
 ```typescript
-import { StripeSubscriptions } from "@convex/stripe";
+import { StripeSubscriptions } from "@convex-dev/stripe";
 
 const stripeClient = new StripeSubscriptions(components.stripe, {
   STRIPE_SECRET_KEY: "sk_...", // Optional, defaults to process.env.STRIPE_SECRET_KEY
@@ -245,9 +245,10 @@ export const getUserPayments = query({
 | `getCustomer` | `stripeCustomerId` | Get a customer by Stripe ID |
 | `listSubscriptions` | `stripeCustomerId` | List subscriptions for a customer |
 | `listSubscriptionsByUserId` | `userId` | List subscriptions for a user |
-| `listSubscriptionsByOrgId` | `orgId` | List subscriptions for an org |
 | `getSubscription` | `stripeSubscriptionId` | Get a subscription by ID |
 | `getSubscriptionByOrgId` | `orgId` | Get subscription for an org |
+| `getPayment` | `stripePaymentIntentId` | Get a payment by ID |
+| `listPayments` | `stripeCustomerId` | List payments for a customer |
 | `listPaymentsByUserId` | `userId` | List payments for a user |
 | `listPaymentsByOrgId` | `orgId` | List payments for an org |
 | `listInvoices` | `stripeCustomerId` | List invoices for a customer |
@@ -270,6 +271,7 @@ The component automatically handles these Stripe webhook events:
 | `invoice.created` | Creates invoice record |
 | `invoice.paid` | Updates invoice to paid |
 | `invoice.payment_failed` | Marks invoice as failed |
+| `checkout.session.completed` | Handles completed checkout sessions |
 
 ### Custom Webhook Handlers
 
@@ -278,7 +280,7 @@ Add custom logic to webhook events:
 ```typescript
 import { httpRouter } from "convex/server";
 import { components } from "./_generated/api";
-import { registerRoutes } from "@convex/stripe";
+import { registerRoutes } from "@convex-dev/stripe";
 import type Stripe from "stripe";
 
 const http = httpRouter();
@@ -324,6 +326,15 @@ The component creates these tables in its namespace:
 | `cancelAtPeriodEnd` | boolean | Will cancel at period end |
 | `userId` | string? | Linked user ID |
 | `orgId` | string? | Linked org ID |
+| `metadata` | object? | Custom metadata |
+
+### checkout_sessions
+| Field | Type | Description |
+|-------|------|-------------|
+| `stripeCheckoutSessionId` | string | Checkout session ID |
+| `stripeCustomerId` | string? | Customer ID |
+| `status` | string | Session status |
+| `mode` | string | Session mode (payment/subscription/setup) |
 | `metadata` | object? | Custom metadata |
 
 ### payments
