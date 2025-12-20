@@ -16,6 +16,7 @@ export default defineSchema({
     status: v.string(),
     currentPeriodEnd: v.number(),
     cancelAtPeriodEnd: v.boolean(),
+    cancelAt: v.optional(v.number()),
     quantity: v.optional(v.number()),
     priceId: v.string(),
     metadata: v.optional(v.any()),

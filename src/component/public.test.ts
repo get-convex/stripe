@@ -191,6 +191,64 @@ test("subscription status update via webhook", async () => {
   expect(subscription?.status).toBe("past_due");
 });
 
+test("subscription plan change updates priceId", async () => {
+  const t = convexTest(schema, modules);
+
+  await t.mutation(api.private.handleSubscriptionCreated, {
+    stripeSubscriptionId: "sub_plan_change",
+    stripeCustomerId: "cus_test",
+    status: "active",
+    currentPeriodEnd: Date.now(),
+    cancelAtPeriodEnd: false,
+    priceId: "price_old",
+  });
+
+  await t.mutation(api.private.handleSubscriptionUpdated, {
+    stripeSubscriptionId: "sub_plan_change",
+    status: "active",
+    currentPeriodEnd: Date.now(),
+    cancelAtPeriodEnd: false,
+    priceId: "price_new",
+  });
+
+  const subscription = await t.query(api.public.getSubscription, {
+    stripeSubscriptionId: "sub_plan_change",
+  });
+
+  expect(subscription?.priceId).toBe("price_new");
+});
+
+test("subscription cancel_at sets cancelAtPeriodEnd when it matches currentPeriodEnd", async () => {
+  const t = convexTest(schema, modules);
+
+  const currentPeriodEnd = Math.floor(Date.now() / 1000) + 30 * 24 * 60 * 60;
+
+  await t.mutation(api.private.handleSubscriptionCreated, {
+    stripeSubscriptionId: "sub_cancel_at",
+    stripeCustomerId: "cus_test",
+    status: "active",
+    currentPeriodEnd,
+    cancelAtPeriodEnd: false,
+    priceId: "price_test",
+  });
+
+  // Some Stripe flows set `cancel_at` but leave `cancel_at_period_end` false.
+  await t.mutation(api.private.handleSubscriptionUpdated, {
+    stripeSubscriptionId: "sub_cancel_at",
+    status: "active",
+    currentPeriodEnd,
+    cancelAtPeriodEnd: false,
+    cancelAt: currentPeriodEnd,
+  });
+
+  const subscription = await t.query(api.public.getSubscription, {
+    stripeSubscriptionId: "sub_cancel_at",
+  });
+
+  expect(subscription?.cancelAtPeriodEnd).toBe(true);
+  expect(subscription?.cancelAt).toBe(currentPeriodEnd);
+});
+
 test("seat quantity update", async () => {
   const t = convexTest(schema, modules);
 

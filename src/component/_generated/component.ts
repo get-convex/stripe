@@ -108,6 +108,7 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
         "mutation",
         "internal",
         {
+          cancelAt?: number;
           cancelAtPeriodEnd: boolean;
           currentPeriodEnd: number;
           metadata?: any;
@@ -131,9 +132,11 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
         "mutation",
         "internal",
         {
+          cancelAt?: number;
           cancelAtPeriodEnd: boolean;
           currentPeriodEnd: number;
           metadata?: any;
+          priceId?: string;
           quantity?: number;
           status: string;
           stripeSubscriptionId: string;
@@ -203,6 +206,7 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
         "internal",
         { stripeSubscriptionId: string },
         {
+          cancelAt?: number;
           cancelAtPeriodEnd: boolean;
           currentPeriodEnd: number;
           metadata?: any;
@@ -221,6 +225,7 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
         "internal",
         { orgId: string },
         {
+          cancelAt?: number;
           cancelAtPeriodEnd: boolean;
           currentPeriodEnd: number;
           metadata?: any;
@@ -341,6 +346,7 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
         "internal",
         { stripeCustomerId: string },
         Array<{
+          cancelAt?: number;
           cancelAtPeriodEnd: boolean;
           currentPeriodEnd: number;
           metadata?: any;
@@ -359,6 +365,7 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
         "internal",
         { userId: string },
         Array<{
+          cancelAt?: number;
           cancelAtPeriodEnd: boolean;
           currentPeriodEnd: number;
           metadata?: any;

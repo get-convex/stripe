@@ -86,6 +86,17 @@ export const handleCustomerUpdated = mutation({
   },
 });
 
+function deriveCancelAtPeriodEnd(
+  cancelAt: number | undefined,
+  currentPeriodEnd: number,
+): boolean {
+  const tolerance = 60 * 5; // 5 minutes
+
+  if (typeof cancelAt !== "number") return false;
+  if (currentPeriodEnd <= 0) return false;
+  return Math.abs(cancelAt - currentPeriodEnd) <= tolerance;
+}
+
 export const handleSubscriptionCreated = mutation({
   args: {
     stripeSubscriptionId: v.string(),
@@ -93,6 +104,7 @@ export const handleSubscriptionCreated = mutation({
     status: v.string(),
     currentPeriodEnd: v.number(),
     cancelAtPeriodEnd: v.boolean(),
+    cancelAt: v.optional(v.number()),
     quantity: v.optional(v.number()),
     priceId: v.string(),
     metadata: v.optional(v.any()),
@@ -111,13 +123,17 @@ export const handleSubscriptionCreated = mutation({
     const orgId = metadata.orgId as string | undefined;
     const userId = metadata.userId as string | undefined;
 
+    const cancelAtPeriodEnd = args.cancelAtPeriodEnd || 
+      deriveCancelAtPeriodEnd(args.cancelAt, args.currentPeriodEnd);
+
     if (!existing) {
       await ctx.db.insert("subscriptions", {
         stripeSubscriptionId: args.stripeSubscriptionId,
         stripeCustomerId: args.stripeCustomerId,
         status: args.status,
         currentPeriodEnd: args.currentPeriodEnd,
-        cancelAtPeriodEnd: args.cancelAtPeriodEnd,
+        cancelAtPeriodEnd: cancelAtPeriodEnd,
+        cancelAt: args.cancelAt || undefined,
         quantity: args.quantity,
         priceId: args.priceId,
         metadata: metadata,
@@ -156,7 +172,9 @@ export const handleSubscriptionUpdated = mutation({
     status: v.string(),
     currentPeriodEnd: v.number(),
     cancelAtPeriodEnd: v.boolean(),
+    cancelAt: v.optional(v.number()),
     quantity: v.optional(v.number()),
+    priceId: v.optional(v.string()),
     metadata: v.optional(v.any()),
   },
   returns: v.null(),
@@ -174,11 +192,16 @@ export const handleSubscriptionUpdated = mutation({
       const orgId = metadata.orgId as string | undefined;
       const userId = metadata.userId as string | undefined;
 
+      const cancelAtPeriodEnd = args.cancelAtPeriodEnd || 
+        deriveCancelAtPeriodEnd(args.cancelAt, args.currentPeriodEnd);
+
       await ctx.db.patch(subscription._id, {
         status: args.status,
         currentPeriodEnd: args.currentPeriodEnd,
-        cancelAtPeriodEnd: args.cancelAtPeriodEnd,
+        cancelAtPeriodEnd: cancelAtPeriodEnd,
+        cancelAt: args.cancelAt || undefined,
         quantity: args.quantity,
+        ...(args.priceId !== undefined && { priceId: args.priceId }),
         // Only update metadata fields if provided
         ...(args.metadata !== undefined && { metadata }),
         ...(orgId !== undefined && { orgId }),

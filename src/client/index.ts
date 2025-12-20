@@ -94,12 +94,15 @@ export class StripeSubscriptions {
     }
 
     // Update local database immediately (don't wait for webhook)
+    const item = subscription.items.data[0];
     await ctx.runMutation(this.component.private.handleSubscriptionUpdated, {
       stripeSubscriptionId: subscription.id,
       status: subscription.status,
-      currentPeriodEnd: subscription.items.data[0]?.current_period_end || 0,
+      currentPeriodEnd: item?.current_period_end || 0,
       cancelAtPeriodEnd: subscription.cancel_at_period_end ?? false,
-      quantity: subscription.items.data[0]?.quantity ?? 1,
+      cancelAt: subscription.cancel_at || undefined,
+      quantity: item?.quantity ?? 1,
+      priceId: item?.price?.id || undefined,
       metadata: subscription.metadata || {},
     });
 
@@ -127,12 +130,15 @@ export class StripeSubscriptions {
     );
 
     // Update local database immediately
+    const item = subscription.items.data[0];
     await ctx.runMutation(this.component.private.handleSubscriptionUpdated, {
       stripeSubscriptionId: subscription.id,
       status: subscription.status,
-      currentPeriodEnd: subscription.items.data[0]?.current_period_end || 0,
+      currentPeriodEnd: item?.current_period_end || 0,
       cancelAtPeriodEnd: subscription.cancel_at_period_end ?? false,
-      quantity: subscription.items.data[0]?.quantity ?? 1,
+      cancelAt: subscription.cancel_at || undefined,
+      quantity: item?.quantity ?? 1,
+      priceId: item?.price?.id || undefined,
       metadata: subscription.metadata || {},
     });
 
@@ -460,27 +466,34 @@ async function processEvent(
 
     case "customer.subscription.created": {
       const subscription = event.data.object as StripeSDK.Subscription;
+      const item = subscription.items.data[0];
+      
       await ctx.runMutation(component.private.handleSubscriptionCreated, {
         stripeSubscriptionId: subscription.id,
         stripeCustomerId: subscription.customer as string,
         status: subscription.status,
-        currentPeriodEnd: subscription.items.data[0]?.current_period_end || 0,
+        currentPeriodEnd: item?.current_period_end || 0,
         cancelAtPeriodEnd: subscription.cancel_at_period_end ?? false,
+        cancelAt: subscription.cancel_at || undefined,
         quantity: subscription.items.data[0]?.quantity ?? 1,
-        priceId: subscription.items.data[0]?.price.id || "",
+        priceId: item?.price?.id || "",
         metadata: subscription.metadata || {},
       });
       break;
     }
 
     case "customer.subscription.updated": {
-      const subscription = event.data.object as any;
+      const subscription = event.data.object as StripeSDK.Subscription;
+      const item = subscription.items.data[0];
+
       await ctx.runMutation(component.private.handleSubscriptionUpdated, {
         stripeSubscriptionId: subscription.id,
         status: subscription.status,
-        currentPeriodEnd: subscription.items.data[0]?.current_period_end || 0,
+        currentPeriodEnd: item?.current_period_end || 0,
         cancelAtPeriodEnd: subscription.cancel_at_period_end ?? false,
+        cancelAt: subscription.cancel_at || undefined,
         quantity: subscription.items.data[0]?.quantity ?? 1,
+        priceId: item?.price?.id || undefined,
         metadata: subscription.metadata || {},
       });
       break;
