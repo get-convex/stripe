@@ -166,6 +166,8 @@ export class StripeSubscriptions {
       subscriptionMetadata?: Record<string, string>;
       /** Metadata to attach to the payment intent (only for mode: "payment") */
       paymentIntentMetadata?: Record<string, string>;
+      allow_promotion_codes?: boolean
+      ui_mode?: "custom" | "embedded" | "hosted"
     },
   ) {
     const stripe = new StripeSDK(this.apiKey);
@@ -181,6 +183,8 @@ export class StripeSubscriptions {
       success_url: args.successUrl,
       cancel_url: args.cancelUrl,
       metadata: args.metadata || {},
+      allow_promotion_codes: args.allow_promotion_codes,
+      ui_mode: args.ui_mode
     };
 
     if (args.customerId) {
