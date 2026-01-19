@@ -570,6 +570,7 @@ async function processEvent(
         amountDue: invoice.amount_due,
         amountPaid: invoice.amount_paid,
         created: invoice.created,
+        metadata: invoice.metadata || {},
       });
       break;
     }
