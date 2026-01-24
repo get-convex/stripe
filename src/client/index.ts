@@ -166,6 +166,10 @@ export class StripeSubscriptions {
       subscriptionMetadata?: Record<string, string>;
       /** Metadata to attach to the payment intent (only for mode: "payment") */
       paymentIntentMetadata?: Record<string, string>;
+      /** Whether to create an invoice for the payment (only for mode: "payment") */
+      invoiceCreation?: boolean;
+      /** Metadata to attach to the invoice (only for mode: "payment" and invoiceCreation: true) */
+      invoiceMetadata?: Record<string, string>;
     },
   ) {
     const stripe = new StripeSDK(this.apiKey);
@@ -199,6 +203,19 @@ export class StripeSubscriptions {
       sessionParams.payment_intent_data = {
         metadata: args.paymentIntentMetadata,
       };
+    }
+
+    // Add invoice creation metadata for linking userId/orgId
+    if (args.mode === "payment" && args.invoiceCreation) {
+      sessionParams.invoice_creation = {
+        enabled: true,
+      };
+
+      if (args.invoiceMetadata) {
+        sessionParams.invoice_data = {
+          metadata: args.invoiceMetadata,
+        };
+      }
     }
 
     const session = await stripe.checkout.sessions.create(sessionParams);
