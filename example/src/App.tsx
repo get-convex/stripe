@@ -891,12 +891,8 @@ function ProfilePage({
 // TEAM BILLING PAGE (#4 - Organization-Based Lookups)
 // ============================================================================
 
-function TeamBillingPage({
-  setCurrentPage,
-}: {
-  setCurrentPage: (page: Page) => void;
-}) {
-  const { isSignedIn, user } = useUser();
+function TeamBillingPage() {
+  const { isSignedIn } = useUser();
   const [orgId, setOrgId] = useState("demo-org-123");
 
   // Using the org-based queries
@@ -1309,7 +1305,7 @@ function App() {
         <ProfilePage setCurrentPage={setCurrentPage} />
       )}
       {currentPage === "team" && (
-        <TeamBillingPage setCurrentPage={setCurrentPage} />
+        <TeamBillingPage />
       )}
     </>
   );
