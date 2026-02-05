@@ -280,6 +280,7 @@ export const handleInvoiceCreated = mutation({
     amountDue: v.number(),
     amountPaid: v.number(),
     created: v.number(),
+    metadata: v.optional(v.any()),
   },
   returns: v.null(),
   handler: async (ctx, args) => {
@@ -292,10 +293,10 @@ export const handleInvoiceCreated = mutation({
 
     if (!existing) {
       // Look up orgId/userId from the subscription if available
-      let orgId: string | undefined;
-      let userId: string | undefined;
+      let orgId: string | undefined = args.metadata?.orgId as string | undefined;
+      let userId: string | undefined = args.metadata?.userId as string | undefined;
 
-      if (args.stripeSubscriptionId) {
+      if ((!orgId || !userId) && args.stripeSubscriptionId) {
         const subscription = await ctx.db
           .query("subscriptions")
           .withIndex("by_stripe_subscription_id", (q) =>
