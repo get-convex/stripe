@@ -1,5 +1,35 @@
 import { v } from "convex/values";
-import { mutation } from "./_generated/server.js";
+import { mutation, query } from "./_generated/server.js";
+
+// ============================================================================
+// INTERNAL QUERIES (for webhooks and internal use)
+// ============================================================================
+
+export const listSubscriptionsWithCreationTime = query({
+  args: { stripeCustomerId: v.string() },
+  returns: v.array(
+    v.object({
+      _creationTime: v.number(),
+      stripeSubscriptionId: v.string(),
+      stripeCustomerId: v.string(),
+      status: v.string(),
+    }),
+  ),
+  handler: async (ctx, args) => {
+    const subscriptions = await ctx.db
+      .query("subscriptions")
+      .withIndex("by_stripe_customer_id", (q) =>
+        q.eq("stripeCustomerId", args.stripeCustomerId),
+      )
+      .collect();
+    return subscriptions.map((s) => ({
+      _creationTime: s._creationTime,
+      stripeSubscriptionId: s.stripeSubscriptionId,
+      stripeCustomerId: s.stripeCustomerId,
+      status: s.status,
+    }));
+  },
+});
 
 // ============================================================================
 // INTERNAL MUTATIONS (for webhooks and internal use)

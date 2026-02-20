@@ -617,16 +617,16 @@ async function processEvent(
       // Check for recent subscriptions
       if (paymentIntent.customer) {
         const recentSubscriptions = await ctx.runQuery(
-          component.public.listSubscriptions,
+          component.private.listSubscriptionsWithCreationTime,
           {
             stripeCustomerId: paymentIntent.customer as string,
           },
         );
 
-        const recentWindowStart =
-          Date.now() / 1000 - RECENT_SUBSCRIPTION_WINDOW_SECONDS;
+        const recentWindowStartMs =
+          Date.now() - RECENT_SUBSCRIPTION_WINDOW_SECONDS * 1000;
         const recentSubscription = recentSubscriptions.find(
-          (sub: any) => sub._creationTime > recentWindowStart,
+          (sub) => sub._creationTime > recentWindowStartMs,
         );
 
         if (recentSubscription) {
