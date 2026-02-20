@@ -302,19 +302,21 @@ export const updateSubscriptionMetadata = mutation({
 /**
  * Update subscription quantity (for seat-based pricing).
  * This will update both Stripe and the local database.
- * STRIPE_SECRET_KEY must be provided as a parameter.
+ * Reads STRIPE_SECRET_KEY from environment variables.
  */
 export const updateSubscriptionQuantity = action({
   args: {
     stripeSubscriptionId: v.string(),
     quantity: v.number(),
-    apiKey: v.string(),
   },
   returns: v.null(),
   handler: async (ctx, args) => {
-    const stripe = new StripeSDK(args.apiKey);
+    const apiKey = process.env.STRIPE_SECRET_KEY;
+    if (!apiKey) {
+      throw new Error("STRIPE_SECRET_KEY environment variable is not set");
+    }
+    const stripe = new StripeSDK(apiKey);
 
-    // Get the subscription from Stripe to find the subscription item ID
     const subscription = await stripe.subscriptions.retrieve(
       args.stripeSubscriptionId,
     );
@@ -323,12 +325,10 @@ export const updateSubscriptionQuantity = action({
       throw new Error("Subscription has no items");
     }
 
-    // Update the subscription item quantity in Stripe
     await stripe.subscriptionItems.update(subscription.items.data[0].id, {
       quantity: args.quantity,
     });
 
-    // Update our local database via mutation
     await ctx.runMutation(api.private.updateSubscriptionQuantityInternal, {
       stripeSubscriptionId: args.stripeSubscriptionId,
       quantity: args.quantity,
