@@ -343,8 +343,8 @@ export const updateSubscriptionMetadata = mutation({
 
     await ctx.db.patch(subscription._id, {
       metadata: args.metadata,
-      orgId: args.orgId,
-      userId: args.userId,
+      ...(args.orgId !== undefined && { orgId: args.orgId }),
+      ...(args.userId !== undefined && { userId: args.userId }),
     });
 
     return null;
