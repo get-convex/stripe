@@ -151,6 +151,11 @@ export class StripeSubscriptions {
 
   /**
    * Create a Stripe Checkout session for one-time payments or subscriptions.
+   *
+   * Use `params` to pass additional Stripe Checkout Session parameters directly
+   * to the Stripe API (e.g. allow_promotion_codes, billing_address_collection,
+   * shipping_address_collection, custom_fields, line_items, subscription_data, etc.).
+   * Values in `params` override any constructed defaults except `mode`.
    */
   async createCheckoutSession(
     ctx: ActionCtx,
@@ -166,6 +171,8 @@ export class StripeSubscriptions {
       subscriptionMetadata?: Record<string, string>;
       /** Metadata to attach to the payment intent (only for mode: "payment") */
       paymentIntentMetadata?: Record<string, string>;
+      /** Additional Stripe Checkout Session parameters passed through to the API */
+      params?: Partial<StripeSDK.Checkout.SessionCreateParams>;
     },
   ) {
     const stripe = new StripeSDK(this.apiKey);
@@ -187,21 +194,22 @@ export class StripeSubscriptions {
       sessionParams.customer = args.customerId;
     }
 
-    // Add subscription metadata for linking userId/orgId
     if (args.mode === "subscription" && args.subscriptionMetadata) {
       sessionParams.subscription_data = {
         metadata: args.subscriptionMetadata,
       };
     }
 
-    // Add payment intent metadata for linking userId/orgId
     if (args.mode === "payment" && args.paymentIntentMetadata) {
       sessionParams.payment_intent_data = {
         metadata: args.paymentIntentMetadata,
       };
     }
 
-    const session = await stripe.checkout.sessions.create(sessionParams);
+    const { mode: _mode, ...paramsOverrides } = args.params || {};
+    const finalParams = { ...sessionParams, ...paramsOverrides };
+
+    const session = await stripe.checkout.sessions.create(finalParams);
 
     return {
       sessionId: session.id,
