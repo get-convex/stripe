@@ -7,9 +7,11 @@ export default defineSchema({
     email: v.optional(v.string()),
     name: v.optional(v.string()),
     metadata: v.optional(v.any()),
+    userId: v.optional(v.string()),
   })
     .index("by_stripe_customer_id", ["stripeCustomerId"])
-    .index("by_email", ["email"]),
+    .index("by_email", ["email"])
+    .index("by_user_id", ["userId"]),
   subscriptions: defineTable({
     stripeSubscriptionId: v.string(),
     stripeCustomerId: v.string(),

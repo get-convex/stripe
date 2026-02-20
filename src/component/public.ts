@@ -39,6 +39,42 @@ export const getCustomer = query({
 });
 
 /**
+ * Get a customer by their email address.
+ * Uses the by_email index for efficient lookup.
+ */
+export const getCustomerByEmail = query({
+  args: { email: v.string() },
+  returns: v.union(customerValidator, v.null()),
+  handler: async (ctx, args) => {
+    const customer = await ctx.db
+      .query("customers")
+      .withIndex("by_email", (q) => q.eq("email", args.email))
+      .first();
+    if (!customer) return null;
+    const { _id, _creationTime, ...data } = customer;
+    return data;
+  },
+});
+
+/**
+ * Get a customer by their user ID.
+ * Uses the by_user_id index for efficient lookup.
+ */
+export const getCustomerByUserId = query({
+  args: { userId: v.string() },
+  returns: v.union(customerValidator, v.null()),
+  handler: async (ctx, args) => {
+    const customer = await ctx.db
+      .query("customers")
+      .withIndex("by_user_id", (q) => q.eq("userId", args.userId))
+      .first();
+    if (!customer) return null;
+    const { _id, _creationTime, ...data } = customer;
+    return data;
+  },
+});
+
+/**
  * Get a subscription by its Stripe subscription ID.
  */
 export const getSubscription = query({
@@ -296,11 +332,15 @@ export const createOrUpdateCustomer = mutation({
       )
       .unique();
 
+    const metadata = args.metadata || {};
+    const userId = metadata.userId as string | undefined;
+
     if (existing) {
       await ctx.db.patch(existing._id, {
         ...(args.email !== undefined && { email: args.email }),
         ...(args.name !== undefined && { name: args.name }),
         ...(args.metadata !== undefined && { metadata: args.metadata }),
+        ...(userId !== undefined && { userId }),
       });
     } else {
       await ctx.db.insert("customers", {
@@ -308,6 +348,7 @@ export const createOrUpdateCustomer = mutation({
         email: args.email,
         name: args.name,
         metadata: args.metadata,
+        userId,
       });
     }
     return args.stripeCustomerId;
@@ -354,19 +395,21 @@ export const updateSubscriptionMetadata = mutation({
 /**
  * Update subscription quantity (for seat-based pricing).
  * This will update both Stripe and the local database.
- * STRIPE_SECRET_KEY must be provided as a parameter.
+ * Reads STRIPE_SECRET_KEY from environment variables.
  */
 export const updateSubscriptionQuantity = action({
   args: {
     stripeSubscriptionId: v.string(),
     quantity: v.number(),
-    apiKey: v.string(),
   },
   returns: v.null(),
   handler: async (ctx, args) => {
-    const stripe = new StripeSDK(args.apiKey);
+    const apiKey = process.env.STRIPE_SECRET_KEY;
+    if (!apiKey) {
+      throw new Error("STRIPE_SECRET_KEY environment variable is not set");
+    }
+    const stripe = new StripeSDK(apiKey);
 
-    // Get the subscription from Stripe to find the subscription item ID
     const subscription = await stripe.subscriptions.retrieve(
       args.stripeSubscriptionId,
     );
@@ -375,12 +418,10 @@ export const updateSubscriptionQuantity = action({
       throw new Error("Subscription has no items");
     }
 
-    // Update the subscription item quantity in Stripe
     await stripe.subscriptionItems.update(subscription.items.data[0].id, {
       quantity: args.quantity,
     });
 
-    // Update our local database via mutation
     await ctx.runMutation(api.private.updateSubscriptionQuantityInternal, {
       stripeSubscriptionId: args.stripeSubscriptionId,
       quantity: args.quantity,

@@ -1,5 +1,35 @@
 import { v } from "convex/values";
-import { mutation } from "./_generated/server.js";
+import { mutation, query } from "./_generated/server.js";
+
+// ============================================================================
+// INTERNAL QUERIES (for webhooks and internal use)
+// ============================================================================
+
+export const listSubscriptionsWithCreationTime = query({
+  args: { stripeCustomerId: v.string() },
+  returns: v.array(
+    v.object({
+      _creationTime: v.number(),
+      stripeSubscriptionId: v.string(),
+      stripeCustomerId: v.string(),
+      status: v.string(),
+    }),
+  ),
+  handler: async (ctx, args) => {
+    const subscriptions = await ctx.db
+      .query("subscriptions")
+      .withIndex("by_stripe_customer_id", (q) =>
+        q.eq("stripeCustomerId", args.stripeCustomerId),
+      )
+      .collect();
+    return subscriptions.map((s) => ({
+      _creationTime: s._creationTime,
+      stripeSubscriptionId: s.stripeSubscriptionId,
+      stripeCustomerId: s.stripeCustomerId,
+      status: s.status,
+    }));
+  },
+});
 
 // ============================================================================
 // INTERNAL MUTATIONS (for webhooks and internal use)
@@ -46,11 +76,14 @@ export const handleCustomerCreated = mutation({
       .unique();
 
     if (!existing) {
+      const metadata = args.metadata || {};
+      const userId = metadata.userId as string | undefined;
       await ctx.db.insert("customers", {
         stripeCustomerId: args.stripeCustomerId,
         email: args.email,
         name: args.name,
-        metadata: args.metadata || {},
+        metadata,
+        userId,
       });
     }
 
@@ -133,7 +166,7 @@ export const handleSubscriptionCreated = mutation({
         status: args.status,
         currentPeriodEnd: args.currentPeriodEnd,
         cancelAtPeriodEnd: cancelAtPeriodEnd,
-        cancelAt: args.cancelAt || undefined,
+        cancelAt: args.cancelAt ?? undefined,
         quantity: args.quantity,
         priceId: args.priceId,
         metadata: metadata,
@@ -199,7 +232,7 @@ export const handleSubscriptionUpdated = mutation({
         status: args.status,
         currentPeriodEnd: args.currentPeriodEnd,
         cancelAtPeriodEnd: cancelAtPeriodEnd,
-        cancelAt: args.cancelAt || undefined,
+        cancelAt: args.cancelAt ?? undefined,
         quantity: args.quantity,
         ...(args.priceId !== undefined && { priceId: args.priceId }),
         // Only update metadata fields if provided
@@ -216,6 +249,9 @@ export const handleSubscriptionUpdated = mutation({
 export const handleSubscriptionDeleted = mutation({
   args: {
     stripeSubscriptionId: v.string(),
+    cancelAtPeriodEnd: v.optional(v.boolean()),
+    currentPeriodEnd: v.optional(v.number()),
+    cancelAt: v.optional(v.number()),
   },
   returns: v.null(),
   handler: async (ctx, args) => {
@@ -229,6 +265,13 @@ export const handleSubscriptionDeleted = mutation({
     if (subscription) {
       await ctx.db.patch(subscription._id, {
         status: "canceled",
+        ...(args.cancelAtPeriodEnd !== undefined && {
+          cancelAtPeriodEnd: args.cancelAtPeriodEnd,
+        }),
+        ...(args.currentPeriodEnd !== undefined && {
+          currentPeriodEnd: args.currentPeriodEnd,
+        }),
+        ...(args.cancelAt !== undefined && { cancelAt: args.cancelAt }),
       });
     }
 

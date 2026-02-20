@@ -54,11 +54,9 @@ export class StripeSubscriptions {
       quantity: number;
     },
   ) {
-    // Delegate to the component's public action, passing the API key
     await ctx.runAction(this.component.public.updateSubscriptionQuantity, {
       stripeSubscriptionId: args.stripeSubscriptionId,
       quantity: args.quantity,
-      apiKey: this.apiKey,
     });
 
     return null;
@@ -256,7 +254,7 @@ export class StripeSubscriptions {
 
   /**
    * Get or create a Stripe customer for a user.
-   * Checks existing subscriptions/payments first to avoid duplicates.
+   * Checks existing customers, subscriptions, and payments to avoid duplicates.
    */
   async getOrCreateCustomer(
     ctx: ActionCtx,
@@ -266,6 +264,32 @@ export class StripeSubscriptions {
       name?: string;
     },
   ) {
+    // Check the customers table directly by userId (uses by_user_id index)
+    const existingByUserId = await ctx.runQuery(
+      this.component.public.getCustomerByUserId,
+      { userId: args.userId },
+    );
+    if (existingByUserId) {
+      return {
+        customerId: existingByUserId.stripeCustomerId,
+        isNew: false,
+      };
+    }
+
+    // Fallback: check by email (uses by_email index)
+    if (args.email) {
+      const existingByEmail = await ctx.runQuery(
+        this.component.public.getCustomerByEmail,
+        { email: args.email },
+      );
+      if (existingByEmail) {
+        return {
+          customerId: existingByEmail.stripeCustomerId,
+          isNew: false,
+        };
+      }
+    }
+
     // Check if customer exists by userId in subscriptions
     const existingSubs = await ctx.runQuery(
       this.component.public.listSubscriptionsByUserId,
@@ -291,7 +315,7 @@ export class StripeSubscriptions {
       email: args.email,
       name: args.name,
       metadata: { userId: args.userId },
-      idempotencyKey: args.userId, // Prevents duplicate customers if called concurrently
+      idempotencyKey: args.userId,
     });
 
     return { customerId: result.customerId, isNew: true };
@@ -467,14 +491,14 @@ async function processEvent(
     case "customer.subscription.created": {
       const subscription = event.data.object as StripeSDK.Subscription;
       const item = subscription.items.data[0];
-      
+
       await ctx.runMutation(component.private.handleSubscriptionCreated, {
         stripeSubscriptionId: subscription.id,
         stripeCustomerId: subscription.customer as string,
         status: subscription.status,
         currentPeriodEnd: item?.current_period_end || 0,
         cancelAtPeriodEnd: subscription.cancel_at_period_end ?? false,
-        cancelAt: subscription.cancel_at || undefined,
+        cancelAt: subscription.cancel_at ?? undefined,
         quantity: subscription.items.data[0]?.quantity ?? 1,
         priceId: item?.price?.id || "",
         metadata: subscription.metadata || {},
@@ -491,7 +515,7 @@ async function processEvent(
         status: subscription.status,
         currentPeriodEnd: item?.current_period_end || 0,
         cancelAtPeriodEnd: subscription.cancel_at_period_end ?? false,
-        cancelAt: subscription.cancel_at || undefined,
+        cancelAt: subscription.cancel_at ?? undefined,
         quantity: subscription.items.data[0]?.quantity ?? 1,
         priceId: item?.price?.id || undefined,
         metadata: subscription.metadata || {},
@@ -501,8 +525,12 @@ async function processEvent(
 
     case "customer.subscription.deleted": {
       const subscription = event.data.object as StripeSDK.Subscription;
+      const item = subscription.items.data[0];
       await ctx.runMutation(component.private.handleSubscriptionDeleted, {
         stripeSubscriptionId: subscription.id,
+        cancelAtPeriodEnd: subscription.cancel_at_period_end ?? false,
+        currentPeriodEnd: item?.current_period_end ?? undefined,
+        cancelAt: subscription.cancel_at ?? undefined,
       });
       break;
     }
@@ -615,16 +643,16 @@ async function processEvent(
       // Check for recent subscriptions
       if (paymentIntent.customer) {
         const recentSubscriptions = await ctx.runQuery(
-          component.public.listSubscriptions,
+          component.private.listSubscriptionsWithCreationTime,
           {
             stripeCustomerId: paymentIntent.customer as string,
           },
         );
 
-        const recentWindowStart =
-          Date.now() / 1000 - RECENT_SUBSCRIPTION_WINDOW_SECONDS;
+        const recentWindowStartMs =
+          Date.now() - RECENT_SUBSCRIPTION_WINDOW_SECONDS * 1000;
         const recentSubscription = recentSubscriptions.find(
-          (sub: any) => sub._creationTime > recentWindowStart,
+          (sub) => sub._creationTime > recentWindowStartMs,
         );
 
         if (recentSubscription) {
