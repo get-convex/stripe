@@ -464,17 +464,25 @@ async function processEvent(
       break;
     }
 
+    case "customer.deleted": {
+      const customer = event.data.object as StripeSDK.Customer;
+      await ctx.runMutation(component.private.handleCustomerDeleted, {
+        stripeCustomerId: customer.id,
+      });
+      break;
+    }
+
     case "customer.subscription.created": {
       const subscription = event.data.object as StripeSDK.Subscription;
       const item = subscription.items.data[0];
-      
+
       await ctx.runMutation(component.private.handleSubscriptionCreated, {
         stripeSubscriptionId: subscription.id,
         stripeCustomerId: subscription.customer as string,
         status: subscription.status,
         currentPeriodEnd: item?.current_period_end || 0,
         cancelAtPeriodEnd: subscription.cancel_at_period_end ?? false,
-        cancelAt: subscription.cancel_at || undefined,
+        cancelAt: subscription.cancel_at ?? undefined,
         quantity: subscription.items.data[0]?.quantity ?? 1,
         priceId: item?.price?.id || "",
         metadata: subscription.metadata || {},
@@ -488,10 +496,11 @@ async function processEvent(
 
       await ctx.runMutation(component.private.handleSubscriptionUpdated, {
         stripeSubscriptionId: subscription.id,
+        stripeCustomerId: subscription.customer as string,
         status: subscription.status,
         currentPeriodEnd: item?.current_period_end || 0,
         cancelAtPeriodEnd: subscription.cancel_at_period_end ?? false,
-        cancelAt: subscription.cancel_at || undefined,
+        cancelAt: subscription.cancel_at ?? undefined,
         quantity: subscription.items.data[0]?.quantity ?? 1,
         priceId: item?.price?.id || undefined,
         metadata: subscription.metadata || {},
@@ -501,8 +510,11 @@ async function processEvent(
 
     case "customer.subscription.deleted": {
       const subscription = event.data.object as StripeSDK.Subscription;
+      const item = subscription.items.data[0];
       await ctx.runMutation(component.private.handleSubscriptionDeleted, {
         stripeSubscriptionId: subscription.id,
+        currentPeriodEnd: item?.current_period_end || undefined,
+        cancelAt: subscription.cancel_at ?? undefined,
       });
       break;
     }
