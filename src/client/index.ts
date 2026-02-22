@@ -163,62 +163,74 @@ export class StripeSubscriptions {
   /**
    * Create a Stripe Checkout session for one-time payments or subscriptions.
    */
-  async createCheckoutSession(
-    ctx: ActionCtx,
-    args: {
-      priceId: string;
-      customerId?: string;
-      mode: "payment" | "subscription" | "setup";
-      successUrl: string;
-      cancelUrl: string;
-      quantity?: number;
-      metadata?: Record<string, string>;
-      /** Metadata to attach to the subscription (only for mode: "subscription") */
-      subscriptionMetadata?: Record<string, string>;
-      /** Metadata to attach to the payment intent (only for mode: "payment") */
-      paymentIntentMetadata?: Record<string, string>;
-    },
-  ) {
-    const stripe = new StripeSDK(this.apiKey);
+  /**
+     * Create a Stripe Checkout session for one-time payments or subscriptions.
+     */
+    async createCheckoutSession(
+      ctx: ActionCtx,
+      args: {
+        priceId: string;
+        customerId?: string;
+        mode: "payment" | "subscription" | "setup";
+        successUrl: string;
+        cancelUrl: string;
+        quantity?: number;
+        metadata?: Record<string, string>;
+        /** Metadata to attach to the subscription (only for mode: "subscription") */
+        subscriptionMetadata?: Record<string, string>;
+        /** Metadata to attach to the payment intent (only for mode: "payment") */
+        paymentIntentMetadata?: Record<string, string>;
+        /** Additional Stripe checkout session parameters.
+         *  Use this to pass any Stripe-supported option (e.g. allow_promotion_codes,
+         *  discounts, locale, currency, trial_period_days, etc.).
+         *  These are spread last, so they override any conflicting built-in params. */
+        additionalParams?: Partial<StripeSDK.Checkout.SessionCreateParams>;
+      },
+    ) {
+      const stripe = new StripeSDK(this.apiKey);
 
-    const sessionParams: StripeSDK.Checkout.SessionCreateParams = {
-      mode: args.mode,
-      line_items: [
-        {
-          price: args.priceId,
-          quantity: args.quantity ?? 1,
-        },
-      ],
-      success_url: args.successUrl,
-      cancel_url: args.cancelUrl,
-      metadata: args.metadata || {},
-    };
+      const sessionParams: StripeSDK.Checkout.SessionCreateParams = {
+        mode: args.mode,
+        line_items: [
+          {
+            price: args.priceId,
+            quantity: args.quantity ?? 1,
+          },
+        ],
+        success_url: args.successUrl,
+        cancel_url: args.cancelUrl,
+        metadata: args.metadata || {},
+      };
 
-    if (args.customerId) {
-      sessionParams.customer = args.customerId;
-    }
+      if (args.customerId) {
+        sessionParams.customer = args.customerId;
+      }
 
-    // Add subscription metadata for linking userId/orgId
-    if (args.mode === "subscription" && args.subscriptionMetadata) {
-      sessionParams.subscription_data = {
-        metadata: args.subscriptionMetadata,
+      // Add subscription metadata for linking userId/orgId
+      if (args.mode === "subscription" && args.subscriptionMetadata) {
+        sessionParams.subscription_data = {
+          metadata: args.subscriptionMetadata,
+        };
+      }
+
+      // Add payment intent metadata for linking userId/orgId
+      if (args.mode === "payment" && args.paymentIntentMetadata) {
+        sessionParams.payment_intent_data = {
+          metadata: args.paymentIntentMetadata,
+        };
+      }
+
+      const session = await stripe.checkout.sessions.create({
+        ...sessionParams,
+        ...args.additionalParams,
+      });
+
+      return {
+        sessionId: session.id,
+        url: session.url,
       };
     }
 
-    // Add payment intent metadata for linking userId/orgId
-    if (args.mode === "payment" && args.paymentIntentMetadata) {
-      sessionParams.payment_intent_data = {
-        metadata: args.paymentIntentMetadata,
-      };
-    }
-
-    const session = await stripe.checkout.sessions.create(sessionParams);
-
-    return {
-      sessionId: session.id,
-      url: session.url,
-    };
-  }
 
   /**
    * Create a new Stripe customer.
