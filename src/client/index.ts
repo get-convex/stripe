@@ -150,62 +150,120 @@ export class StripeSubscriptions {
   /**
    * Create a Stripe Checkout session for one-time payments or subscriptions.
    */
-  async createCheckoutSession(
-    ctx: ActionCtx,
-    args: {
-      priceId: string;
-      customerId?: string;
-      mode: "payment" | "subscription" | "setup";
-      successUrl: string;
-      cancelUrl: string;
-      quantity?: number;
-      metadata?: Record<string, string>;
-      /** Metadata to attach to the subscription (only for mode: "subscription") */
-      subscriptionMetadata?: Record<string, string>;
-      /** Metadata to attach to the payment intent (only for mode: "payment") */
-      paymentIntentMetadata?: Record<string, string>;
-    },
-  ) {
-    const stripe = new StripeSDK(this.apiKey);
+  /**
+     * Create a Stripe Checkout session for one-time payments or subscriptions.
+     */
+    async createCheckoutSession(
+      ctx: ActionCtx,
+      args: {
+        priceId: string;
+        customerId?: string;
+        mode: "payment" | "subscription" | "setup";
+        successUrl: string;
+        cancelUrl: string;
+        quantity?: number;
+        metadata?: Record<string, string>;
+        /** Metadata to attach to the subscription (only for mode: "subscription") */
+        subscriptionMetadata?: Record<string, string>;
+        /** Metadata to attach to the payment intent (only for mode: "payment") */
+        paymentIntentMetadata?: Record<string, string>;
+        /** Enable the promotion code input field on hosted checkout.
+         *  Mutually exclusive with `discounts`. */
+        allowPromotionCodes?: boolean;
+        /** Explicit list of payment method types.
+         *  If omitted, Stripe uses Dashboard payment method settings. */
+        paymentMethodTypes?: string[];
+        /** Payment method-specific options. */
+        paymentMethodOptions?: Record<string, unknown>;
+        /** Server-applied discounts (coupon or promotion code IDs).
+         *  Mutually exclusive with `allowPromotionCodes`. */
+        discounts?: Array<{ coupon?: string; promotion_code?: string }>;
+        /** Locale for the checkout page. */
+        locale?: string;
+        /** Currency override. Required when using price_data instead of a Price ID. */
+        currency?: string;
+      },
+    ) {
+      if (args.allowPromotionCodes && args.discounts?.length) {
+        throw new Error(
+          "Cannot use both allowPromotionCodes and discounts — Stripe requires one or the other",
+        );
+      }
 
-    const sessionParams: StripeSDK.Checkout.SessionCreateParams = {
-      mode: args.mode,
-      line_items: [
-        {
-          price: args.priceId,
-          quantity: args.quantity ?? 1,
-        },
-      ],
-      success_url: args.successUrl,
-      cancel_url: args.cancelUrl,
-      metadata: args.metadata || {},
-    };
+      const stripe = new StripeSDK(this.apiKey);
 
-    if (args.customerId) {
-      sessionParams.customer = args.customerId;
-    }
+      const sessionParams: StripeSDK.Checkout.SessionCreateParams = {
+        mode: args.mode,
+        line_items: [
+          {
+            price: args.priceId,
+            quantity: args.quantity ?? 1,
+          },
+        ],
+        success_url: args.successUrl,
+        cancel_url: args.cancelUrl,
+        metadata: args.metadata || {},
+      };
 
-    // Add subscription metadata for linking userId/orgId
-    if (args.mode === "subscription" && args.subscriptionMetadata) {
-      sessionParams.subscription_data = {
-        metadata: args.subscriptionMetadata,
+      if (args.customerId) {
+        sessionParams.customer = args.customerId;
+      }
+
+      // Add subscription metadata for linking userId/orgId
+      if (args.mode === "subscription" && args.subscriptionMetadata) {
+        sessionParams.subscription_data = {
+          metadata: args.subscriptionMetadata,
+        };
+      }
+
+      // Add payment intent metadata for linking userId/orgId
+      if (args.mode === "payment" && args.paymentIntentMetadata) {
+        sessionParams.payment_intent_data = {
+          metadata: args.paymentIntentMetadata,
+        };
+      }
+
+      // Promotion codes
+      if (args.allowPromotionCodes) {
+        sessionParams.allow_promotion_codes = true;
+      }
+
+      // Payment method types
+      if (args.paymentMethodTypes && args.paymentMethodTypes.length > 0) {
+        sessionParams.payment_method_types =
+          args.paymentMethodTypes as StripeSDK.Checkout.SessionCreateParams.PaymentMethodType[];
+      }
+
+      // Payment method options
+      if (args.paymentMethodOptions) {
+        sessionParams.payment_method_options =
+          args.paymentMethodOptions as StripeSDK.Checkout.SessionCreateParams.PaymentMethodOptions;
+      }
+
+      // Discounts
+      if (args.discounts && args.discounts.length > 0) {
+        sessionParams.discounts = args.discounts;
+      }
+
+      // Locale
+      if (args.locale) {
+        sessionParams.locale =
+          args.locale as StripeSDK.Checkout.SessionCreateParams.Locale;
+      }
+
+      // Currency
+      if (args.currency) {
+        sessionParams.currency = args.currency;
+      }
+
+      const session = await stripe.checkout.sessions.create(sessionParams);
+
+      return {
+        sessionId: session.id,
+        url: session.url,
       };
     }
 
-    // Add payment intent metadata for linking userId/orgId
-    if (args.mode === "payment" && args.paymentIntentMetadata) {
-      sessionParams.payment_intent_data = {
-        metadata: args.paymentIntentMetadata,
-      };
-    }
-
-    const session = await stripe.checkout.sessions.create(sessionParams);
-
-    return {
-      sessionId: session.id,
-      url: session.url,
-    };
-  }
 
   /**
    * Create a new Stripe customer.
@@ -556,6 +614,29 @@ async function processEvent(
           stripePaymentIntentId: session.payment_intent as string,
           stripeCustomerId: session.customer as string,
         });
+      }
+
+      // Expand discount/promotion code data on the session so custom handlers
+      // can access the promotion code string directly without additional API calls.
+      // This is consistent with the subscription mode pattern below where we
+      // retrieve additional data from the Stripe API.
+      if (session.discounts && session.discounts.length > 0) {
+        try {
+          const expandedSession = await stripe.checkout.sessions.retrieve(
+            session.id,
+            { expand: ["discounts.promotion_code"] },
+          );
+          // Mutate the event's session object in-place so custom handlers see it
+          (event.data.object as any).discounts = expandedSession.discounts;
+          (event.data.object as any).total_details =
+            expandedSession.total_details;
+        } catch (err) {
+          console.error(
+            "Error expanding discount data on checkout session:",
+            err,
+          );
+          // Non-fatal — custom handlers can still work without expanded discounts
+        }
       }
 
       // For subscription mode, fetch and store the latest invoice
