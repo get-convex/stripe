@@ -1,0 +1,75 @@
+import { defineSchema, defineTable } from "convex/server";
+import { v } from "convex/values";
+export default defineSchema({
+    customers: defineTable({
+        stripeCustomerId: v.string(),
+        email: v.optional(v.string()),
+        name: v.optional(v.string()),
+        metadata: v.optional(v.any()),
+        userId: v.optional(v.string()),
+    })
+        .index("by_stripe_customer_id", ["stripeCustomerId"])
+        .index("by_email", ["email"])
+        .index("by_user_id", ["userId"]),
+    subscriptions: defineTable({
+        stripeSubscriptionId: v.string(),
+        stripeCustomerId: v.string(),
+        status: v.string(),
+        currentPeriodEnd: v.number(),
+        cancelAtPeriodEnd: v.boolean(),
+        cancelAt: v.optional(v.number()),
+        quantity: v.optional(v.number()),
+        priceId: v.string(),
+        metadata: v.optional(v.any()),
+        // Custom lookup fields for efficient querying
+        orgId: v.optional(v.string()),
+        userId: v.optional(v.string()),
+    })
+        .index("by_stripe_subscription_id", ["stripeSubscriptionId"])
+        .index("by_stripe_customer_id", ["stripeCustomerId"])
+        .index("by_org_id", ["orgId"])
+        .index("by_user_id", ["userId"]),
+    checkout_sessions: defineTable({
+        stripeCheckoutSessionId: v.string(),
+        stripeCustomerId: v.optional(v.string()),
+        status: v.string(),
+        mode: v.string(),
+        metadata: v.optional(v.any()),
+    })
+        .index("by_stripe_checkout_session_id", ["stripeCheckoutSessionId"])
+        .index("by_stripe_customer_id", ["stripeCustomerId"]),
+    payments: defineTable({
+        stripePaymentIntentId: v.string(),
+        stripeCustomerId: v.optional(v.string()),
+        amount: v.number(),
+        currency: v.string(),
+        status: v.string(),
+        created: v.number(),
+        metadata: v.optional(v.any()),
+        // Custom lookup fields for efficient querying
+        orgId: v.optional(v.string()),
+        userId: v.optional(v.string()),
+    })
+        .index("by_stripe_payment_intent_id", ["stripePaymentIntentId"])
+        .index("by_stripe_customer_id", ["stripeCustomerId"])
+        .index("by_org_id", ["orgId"])
+        .index("by_user_id", ["userId"]),
+    invoices: defineTable({
+        stripeInvoiceId: v.string(),
+        stripeCustomerId: v.string(),
+        stripeSubscriptionId: v.optional(v.string()),
+        status: v.string(),
+        amountDue: v.number(),
+        amountPaid: v.number(),
+        created: v.number(),
+        // Custom lookup fields for efficient querying
+        orgId: v.optional(v.string()),
+        userId: v.optional(v.string()),
+    })
+        .index("by_stripe_invoice_id", ["stripeInvoiceId"])
+        .index("by_stripe_customer_id", ["stripeCustomerId"])
+        .index("by_stripe_subscription_id", ["stripeSubscriptionId"])
+        .index("by_org_id", ["orgId"])
+        .index("by_user_id", ["userId"]),
+});
+//# sourceMappingURL=schema.js.map

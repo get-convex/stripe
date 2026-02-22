@@ -1,0 +1,536 @@
+import { httpActionGeneric } from "convex/server";
+import StripeSDK from "stripe";
+/**
+ * Time window (in seconds) to check for recent subscriptions when processing
+ * payment_intent.succeeded events. This helps avoid creating duplicate payment
+ * records for subscription payments.
+ */
+const RECENT_SUBSCRIPTION_WINDOW_SECONDS = 10 * 60; // 10 minutes
+/**
+ * Stripe Component Client
+ *
+ * Provides methods for managing Stripe customers, subscriptions, payments,
+ * and webhooks through Convex.
+ */
+export class StripeSubscriptions {
+    component;
+    _apiKey;
+    constructor(component, options) {
+        this.component = component;
+        this._apiKey = options?.STRIPE_SECRET_KEY ?? process.env.STRIPE_SECRET_KEY;
+    }
+    get apiKey() {
+        if (!this._apiKey) {
+            throw new Error("STRIPE_SECRET_KEY environment variable is not set");
+        }
+        return this._apiKey;
+    }
+    /**
+     * Update subscription quantity (for seat-based pricing).
+     * This will update both Stripe and the local database.
+     */
+    async updateSubscriptionQuantity(ctx, args) {
+        await ctx.runAction(this.component.public.updateSubscriptionQuantity, {
+            stripeSubscriptionId: args.stripeSubscriptionId,
+            quantity: args.quantity,
+        });
+        return null;
+    }
+    /**
+     * Cancel a subscription either immediately or at period end.
+     * Updates both Stripe and the local database.
+     */
+    async cancelSubscription(ctx, args) {
+        const stripe = new StripeSDK(this.apiKey);
+        const cancelAtPeriodEnd = args.cancelAtPeriodEnd ?? true;
+        let subscription;
+        if (cancelAtPeriodEnd) {
+            subscription = await stripe.subscriptions.update(args.stripeSubscriptionId, {
+                cancel_at_period_end: true,
+            });
+        }
+        else {
+            subscription = await stripe.subscriptions.cancel(args.stripeSubscriptionId);
+        }
+        // Update local database immediately (don't wait for webhook)
+        const item = subscription.items.data[0];
+        await ctx.runMutation(this.component.private.handleSubscriptionUpdated, {
+            stripeSubscriptionId: subscription.id,
+            status: subscription.status,
+            currentPeriodEnd: item?.current_period_end || 0,
+            cancelAtPeriodEnd: subscription.cancel_at_period_end ?? false,
+            cancelAt: subscription.cancel_at || undefined,
+            quantity: item?.quantity ?? 1,
+            priceId: item?.price?.id || undefined,
+            metadata: subscription.metadata || {},
+        });
+        return null;
+    }
+    /**
+     * Reactivate a subscription that was set to cancel at period end.
+     * Updates both Stripe and the local database.
+     */
+    async reactivateSubscription(ctx, args) {
+        const stripe = new StripeSDK(this.apiKey);
+        // Reactivate by setting cancel_at_period_end to false
+        const subscription = await stripe.subscriptions.update(args.stripeSubscriptionId, {
+            cancel_at_period_end: false,
+        });
+        // Update local database immediately
+        const item = subscription.items.data[0];
+        await ctx.runMutation(this.component.private.handleSubscriptionUpdated, {
+            stripeSubscriptionId: subscription.id,
+            status: subscription.status,
+            currentPeriodEnd: item?.current_period_end || 0,
+            cancelAtPeriodEnd: subscription.cancel_at_period_end ?? false,
+            cancelAt: subscription.cancel_at || undefined,
+            quantity: item?.quantity ?? 1,
+            priceId: item?.price?.id || undefined,
+            metadata: subscription.metadata || {},
+        });
+        return null;
+    }
+    // ============================================================================
+    // CHECKOUT & PAYMENTS
+    // ============================================================================
+    /**
+     * Create a Stripe Checkout session for one-time payments or subscriptions.
+     */
+    /**
+       * Create a Stripe Checkout session for one-time payments or subscriptions.
+       */
+    async createCheckoutSession(ctx, args) {
+        if (args.allowPromotionCodes && args.discounts?.length) {
+            throw new Error("Cannot use both allowPromotionCodes and discounts — Stripe requires one or the other");
+        }
+        const stripe = new StripeSDK(this.apiKey);
+        const sessionParams = {
+            mode: args.mode,
+            line_items: [
+                {
+                    price: args.priceId,
+                    quantity: args.quantity ?? 1,
+                },
+            ],
+            success_url: args.successUrl,
+            cancel_url: args.cancelUrl,
+            metadata: args.metadata || {},
+        };
+        if (args.customerId) {
+            sessionParams.customer = args.customerId;
+        }
+        // Add subscription metadata for linking userId/orgId
+        if (args.mode === "subscription" && args.subscriptionMetadata) {
+            sessionParams.subscription_data = {
+                metadata: args.subscriptionMetadata,
+            };
+        }
+        // Add payment intent metadata for linking userId/orgId
+        if (args.mode === "payment" && args.paymentIntentMetadata) {
+            sessionParams.payment_intent_data = {
+                metadata: args.paymentIntentMetadata,
+            };
+        }
+        // Promotion codes
+        if (args.allowPromotionCodes) {
+            sessionParams.allow_promotion_codes = true;
+        }
+        // Payment method types
+        if (args.paymentMethodTypes && args.paymentMethodTypes.length > 0) {
+            sessionParams.payment_method_types =
+                args.paymentMethodTypes;
+        }
+        // Payment method options
+        if (args.paymentMethodOptions) {
+            sessionParams.payment_method_options =
+                args.paymentMethodOptions;
+        }
+        // Discounts
+        if (args.discounts && args.discounts.length > 0) {
+            sessionParams.discounts = args.discounts;
+        }
+        // Locale
+        if (args.locale) {
+            sessionParams.locale =
+                args.locale;
+        }
+        // Currency
+        if (args.currency) {
+            sessionParams.currency = args.currency;
+        }
+        const session = await stripe.checkout.sessions.create(sessionParams);
+        return {
+            sessionId: session.id,
+            url: session.url,
+        };
+    }
+    /**
+     * Create a new Stripe customer.
+     *
+     * @param args.idempotencyKey - Optional key to prevent duplicate customer creation.
+     *   If two requests come in with the same key, Stripe returns the same customer.
+     *   Recommended: pass `userId` to prevent race conditions.
+     */
+    async createCustomer(ctx, args) {
+        const stripe = new StripeSDK(this.apiKey);
+        // Use idempotency key to prevent duplicate customers from race conditions
+        const requestOptions = args.idempotencyKey
+            ? { idempotencyKey: `create_customer_${args.idempotencyKey}` }
+            : undefined;
+        const customer = await stripe.customers.create({
+            email: args.email,
+            name: args.name,
+            metadata: args.metadata,
+        }, requestOptions);
+        // Store in our database
+        await ctx.runMutation(this.component.public.createOrUpdateCustomer, {
+            stripeCustomerId: customer.id,
+            email: args.email,
+            name: args.name,
+            metadata: args.metadata,
+        });
+        return {
+            customerId: customer.id,
+        };
+    }
+    /**
+     * Get or create a Stripe customer for a user.
+     * Checks existing customers, subscriptions, and payments to avoid duplicates.
+     */
+    async getOrCreateCustomer(ctx, args) {
+        // Check the customers table directly by userId (uses by_user_id index)
+        const existingByUserId = await ctx.runQuery(this.component.public.getCustomerByUserId, { userId: args.userId });
+        if (existingByUserId) {
+            return {
+                customerId: existingByUserId.stripeCustomerId,
+                isNew: false,
+            };
+        }
+        // Fallback: check by email (uses by_email index)
+        if (args.email) {
+            const existingByEmail = await ctx.runQuery(this.component.public.getCustomerByEmail, { email: args.email });
+            if (existingByEmail) {
+                return {
+                    customerId: existingByEmail.stripeCustomerId,
+                    isNew: false,
+                };
+            }
+        }
+        // Check if customer exists by userId in subscriptions
+        const existingSubs = await ctx.runQuery(this.component.public.listSubscriptionsByUserId, { userId: args.userId });
+        if (existingSubs.length > 0) {
+            return { customerId: existingSubs[0].stripeCustomerId, isNew: false };
+        }
+        // Check existing payments
+        const existingPayments = await ctx.runQuery(this.component.public.listPaymentsByUserId, { userId: args.userId });
+        if (existingPayments.length > 0 && existingPayments[0].stripeCustomerId) {
+            return { customerId: existingPayments[0].stripeCustomerId, isNew: false };
+        }
+        // Create a new customer with idempotency key to prevent race conditions
+        const result = await this.createCustomer(ctx, {
+            email: args.email,
+            name: args.name,
+            metadata: { userId: args.userId },
+            idempotencyKey: args.userId,
+        });
+        return { customerId: result.customerId, isNew: true };
+    }
+    /**
+     * Create a Stripe Customer Portal session for managing subscriptions.
+     */
+    async createCustomerPortalSession(ctx, args) {
+        const stripe = new StripeSDK(this.apiKey);
+        const session = await stripe.billingPortal.sessions.create({
+            customer: args.customerId,
+            return_url: args.returnUrl,
+        });
+        return {
+            url: session.url,
+        };
+    }
+}
+/**
+ * Register webhook routes with the HTTP router.
+ * This simplifies webhook setup by handling signature verification
+ * and routing events to the appropriate handlers automatically.
+ *
+ * @param http - The HTTP router instance
+ * @param config - Optional configuration for webhook path and event handlers
+ *
+ * @example
+ * ```typescript
+ * // convex/http.ts
+ * import { httpRouter } from "convex/server";
+ * import { stripe } from "./stripe";
+ *
+ * const http = httpRouter();
+ *
+ * stripe.registerRoutes(http, {
+ *   events: {
+ *     "customer.subscription.updated": async (ctx, event) => {
+ *       // Your custom logic after default handling
+ *       console.log("Subscription updated:", event.data.object);
+ *     },
+ *   },
+ * });
+ *
+ * export default http;
+ * ```
+ */
+export function registerRoutes(http, component, config) {
+    const webhookPath = config?.webhookPath ?? "/stripe/webhook";
+    const eventHandlers = config?.events ?? {};
+    http.route({
+        path: webhookPath,
+        method: "POST",
+        handler: httpActionGeneric(async (ctx, req) => {
+            const webhookSecret = config?.STRIPE_WEBHOOK_SECRET || process.env.STRIPE_WEBHOOK_SECRET;
+            if (!webhookSecret) {
+                console.error("❌ STRIPE_WEBHOOK_SECRET is not set");
+                return new Response("Webhook secret not configured", { status: 500 });
+            }
+            const signature = req.headers.get("stripe-signature");
+            if (!signature) {
+                console.error("❌ No Stripe signature in headers");
+                return new Response("No signature provided", { status: 400 });
+            }
+            const body = await req.text();
+            const apiKey = config?.STRIPE_SECRET_KEY || process.env.STRIPE_SECRET_KEY;
+            if (!apiKey) {
+                console.error("❌ STRIPE_SECRET_KEY is not set");
+                return new Response("Stripe secret key not configured", {
+                    status: 500,
+                });
+            }
+            const stripe = new StripeSDK(apiKey);
+            // Verify webhook signature
+            let event;
+            try {
+                event = await stripe.webhooks.constructEventAsync(body, signature, webhookSecret);
+            }
+            catch (err) {
+                console.error("❌ Webhook signature verification failed:", err);
+                return new Response(`Webhook signature verification failed: ${err instanceof Error ? err.message : String(err)}`, { status: 400 });
+            }
+            // Process the event with default handlers
+            try {
+                await processEvent(ctx, component, event, stripe);
+                // Call generic event handler if provided
+                if (config?.onEvent) {
+                    await config.onEvent(ctx, event);
+                }
+                // Call custom event handler if provided
+                const eventType = event.type;
+                const customHandler = eventHandlers[eventType];
+                if (customHandler) {
+                    await customHandler(ctx, event);
+                }
+            }
+            catch (error) {
+                console.error("❌ Error processing webhook:", error);
+                return new Response("Error processing webhook", { status: 500 });
+            }
+            return new Response(JSON.stringify({ received: true }), {
+                status: 200,
+                headers: { "Content-Type": "application/json" },
+            });
+        }),
+    });
+}
+/**
+ * Internal method to process Stripe webhook events with default handling.
+ * This handles the database syncing for all supported event types.
+ */
+async function processEvent(ctx, component, event, stripe) {
+    switch (event.type) {
+        case "customer.created":
+        case "customer.updated": {
+            const customer = event.data.object;
+            const handler = event.type === "customer.created"
+                ? component.private.handleCustomerCreated
+                : component.private.handleCustomerUpdated;
+            await ctx.runMutation(handler, {
+                stripeCustomerId: customer.id,
+                email: customer.email || undefined,
+                name: customer.name || undefined,
+                metadata: customer.metadata,
+            });
+            break;
+        }
+        case "customer.subscription.created": {
+            const subscription = event.data.object;
+            const item = subscription.items.data[0];
+            await ctx.runMutation(component.private.handleSubscriptionCreated, {
+                stripeSubscriptionId: subscription.id,
+                stripeCustomerId: subscription.customer,
+                status: subscription.status,
+                currentPeriodEnd: item?.current_period_end || 0,
+                cancelAtPeriodEnd: subscription.cancel_at_period_end ?? false,
+                cancelAt: subscription.cancel_at ?? undefined,
+                quantity: subscription.items.data[0]?.quantity ?? 1,
+                priceId: item?.price?.id || "",
+                metadata: subscription.metadata || {},
+            });
+            break;
+        }
+        case "customer.subscription.updated": {
+            const subscription = event.data.object;
+            const item = subscription.items.data[0];
+            await ctx.runMutation(component.private.handleSubscriptionUpdated, {
+                stripeSubscriptionId: subscription.id,
+                status: subscription.status,
+                currentPeriodEnd: item?.current_period_end || 0,
+                cancelAtPeriodEnd: subscription.cancel_at_period_end ?? false,
+                cancelAt: subscription.cancel_at ?? undefined,
+                quantity: subscription.items.data[0]?.quantity ?? 1,
+                priceId: item?.price?.id || undefined,
+                metadata: subscription.metadata || {},
+            });
+            break;
+        }
+        case "customer.subscription.deleted": {
+            const subscription = event.data.object;
+            const item = subscription.items.data[0];
+            await ctx.runMutation(component.private.handleSubscriptionDeleted, {
+                stripeSubscriptionId: subscription.id,
+                cancelAtPeriodEnd: subscription.cancel_at_period_end ?? false,
+                currentPeriodEnd: item?.current_period_end ?? undefined,
+                cancelAt: subscription.cancel_at ?? undefined,
+            });
+            break;
+        }
+        case "checkout.session.completed": {
+            const session = event.data.object;
+            await ctx.runMutation(component.private.handleCheckoutSessionCompleted, {
+                stripeCheckoutSessionId: session.id,
+                stripeCustomerId: session.customer
+                    ? session.customer
+                    : undefined,
+                mode: session.mode || "payment",
+                metadata: session.metadata || undefined,
+            });
+            // For payment mode, link the payment to the customer if we have both
+            if (session.mode === "payment" &&
+                session.customer &&
+                session.payment_intent) {
+                await ctx.runMutation(component.private.updatePaymentCustomer, {
+                    stripePaymentIntentId: session.payment_intent,
+                    stripeCustomerId: session.customer,
+                });
+            }
+            // Expand discount/promotion code data on the session so custom handlers
+            // can access the promotion code string directly without additional API calls.
+            // This is consistent with the subscription mode pattern below where we
+            // retrieve additional data from the Stripe API.
+            if (session.discounts && session.discounts.length > 0) {
+                try {
+                    const expandedSession = await stripe.checkout.sessions.retrieve(session.id, { expand: ["discounts.promotion_code"] });
+                    // Mutate the event's session object in-place so custom handlers see it
+                    event.data.object.discounts = expandedSession.discounts;
+                    event.data.object.total_details =
+                        expandedSession.total_details;
+                }
+                catch (err) {
+                    console.error("Error expanding discount data on checkout session:", err);
+                    // Non-fatal — custom handlers can still work without expanded discounts
+                }
+            }
+            // For subscription mode, fetch and store the latest invoice
+            if (session.mode === "subscription" && session.subscription) {
+                try {
+                    const subscription = await stripe.subscriptions.retrieve(session.subscription);
+                    if (subscription.latest_invoice) {
+                        const invoice = await stripe.invoices.retrieve(subscription.latest_invoice);
+                        await ctx.runMutation(component.private.handleInvoiceCreated, {
+                            stripeInvoiceId: invoice.id,
+                            stripeCustomerId: invoice.customer,
+                            stripeSubscriptionId: subscription.id,
+                            status: invoice.status || "paid",
+                            amountDue: invoice.amount_due,
+                            amountPaid: invoice.amount_paid,
+                            created: invoice.created,
+                        });
+                    }
+                }
+                catch (err) {
+                    console.error("Error fetching invoice for subscription:", err);
+                }
+            }
+            break;
+        }
+        case "invoice.created":
+        case "invoice.finalized": {
+            const invoice = event.data.object;
+            await ctx.runMutation(component.private.handleInvoiceCreated, {
+                stripeInvoiceId: invoice.id,
+                stripeCustomerId: invoice.customer,
+                stripeSubscriptionId: invoice.subscription,
+                status: invoice.status || "open",
+                amountDue: invoice.amount_due,
+                amountPaid: invoice.amount_paid,
+                created: invoice.created,
+            });
+            break;
+        }
+        case "invoice.paid":
+        case "invoice.payment_succeeded": {
+            const invoice = event.data.object;
+            await ctx.runMutation(component.private.handleInvoicePaid, {
+                stripeInvoiceId: invoice.id,
+                amountPaid: invoice.amount_paid,
+            });
+            break;
+        }
+        case "invoice.payment_failed": {
+            const invoice = event.data.object;
+            await ctx.runMutation(component.private.handleInvoicePaymentFailed, {
+                stripeInvoiceId: invoice.id,
+            });
+            break;
+        }
+        case "payment_intent.succeeded": {
+            const paymentIntent = event.data.object;
+            // Check if this is a subscription payment
+            if (paymentIntent.invoice) {
+                try {
+                    const invoice = await stripe.invoices.retrieve(paymentIntent.invoice);
+                    if (invoice.subscription) {
+                        console.log("⏭️ Skipping payment_intent.succeeded - subscription payment");
+                        break;
+                    }
+                }
+                catch (err) {
+                    console.error("Error checking invoice:", err);
+                }
+            }
+            // Check for recent subscriptions
+            if (paymentIntent.customer) {
+                const recentSubscriptions = await ctx.runQuery(component.private.listSubscriptionsWithCreationTime, {
+                    stripeCustomerId: paymentIntent.customer,
+                });
+                const recentWindowStartMs = Date.now() - RECENT_SUBSCRIPTION_WINDOW_SECONDS * 1000;
+                const recentSubscription = recentSubscriptions.find((sub) => sub._creationTime > recentWindowStartMs);
+                if (recentSubscription) {
+                    console.log("⏭️ Skipping payment_intent.succeeded - recent subscription");
+                    break;
+                }
+            }
+            await ctx.runMutation(component.private.handlePaymentIntentSucceeded, {
+                stripePaymentIntentId: paymentIntent.id,
+                stripeCustomerId: paymentIntent.customer
+                    ? paymentIntent.customer
+                    : undefined,
+                amount: paymentIntent.amount,
+                currency: paymentIntent.currency,
+                status: paymentIntent.status,
+                created: paymentIntent.created,
+                metadata: paymentIntent.metadata || {},
+            });
+            break;
+        }
+        default:
+            console.log(`ℹ️ Unhandled event type: ${event.type}`);
+    }
+}
+export default StripeSubscriptions;
+//# sourceMappingURL=index.js.map
