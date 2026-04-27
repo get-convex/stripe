@@ -1,6 +1,6 @@
 import { convexTest } from "convex-test";
 import { expect, test } from "vitest";
-import { api, internal } from "./_generated/api.js";
+import { api } from "./_generated/api.js";
 import schema from "./schema.js";
 import { modules } from "./setup.test.js";
 
@@ -123,8 +123,12 @@ test("list subscriptions for customer", async () => {
   });
 
   expect(subscriptions).toHaveLength(2);
-  expect(subscriptions.map((s: any) => s.stripeSubscriptionId)).toContain("sub_1");
-  expect(subscriptions.map((s: any) => s.stripeSubscriptionId)).toContain("sub_2");
+  expect(subscriptions.map((s: any) => s.stripeSubscriptionId)).toContain(
+    "sub_1",
+  );
+  expect(subscriptions.map((s: any) => s.stripeSubscriptionId)).toContain(
+    "sub_2",
+  );
 });
 
 test("update subscription metadata for custom lookups", async () => {
@@ -403,8 +407,12 @@ test("list payments by customer ID", async () => {
   });
 
   expect(payments).toHaveLength(2);
-  expect(payments?.map((p: any) => p.stripePaymentIntentId)).toContain("pi_cust1");
-  expect(payments?.map((p: any) => p.stripePaymentIntentId)).toContain("pi_cust2");
+  expect(payments?.map((p: any) => p.stripePaymentIntentId)).toContain(
+    "pi_cust1",
+  );
+  expect(payments?.map((p: any) => p.stripePaymentIntentId)).toContain(
+    "pi_cust2",
+  );
 });
 
 test("list payments by user ID", async () => {
@@ -447,7 +455,9 @@ test("list payments by user ID", async () => {
   });
 
   expect(alicePayments).toHaveLength(2);
-  expect(alicePayments?.every((p: any) => p.userId === "user_alice")).toBe(true);
+  expect(alicePayments?.every((p: any) => p.userId === "user_alice")).toBe(
+    true,
+  );
 });
 
 test("list payments by org ID", async () => {
@@ -587,4 +597,3 @@ test("handlePaymentIntentSucceeded updates existing payment with customer", asyn
 
   expect(payment?.stripeCustomerId).toBe("cus_idempotent");
 });
-
