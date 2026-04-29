@@ -1,11 +1,8 @@
-# @convex-dev/stripe
-
-[![Integrate Stripe with Convex in 10 mins (Stripe Component)](https://thumbs.video-to-markdown.com/71e9f645.jpg)](https://youtu.be/-S4iHTAxnRw)
+## @convex-dev/stripe
 
 A Convex component for integrating Stripe payments, subscriptions, and billing
 into your Convex application.
 
-[![npm version](https://badge.fury.io/js/@convex-dev%2Fstripe.svg)](https://badge.fury.io/js/@convex-dev%2Fstripe)
 
 ## Features
 
