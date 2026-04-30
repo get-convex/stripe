@@ -6,6 +6,7 @@ import type {
   HttpRouter,
   RegisterRoutesConfig,
   StripeEventHandlers,
+  StripeEventHandler,
 } from "./types.js";
 import type { ComponentApi } from "../component/_generated/component.js";
 
@@ -15,6 +16,31 @@ import type { ComponentApi } from "../component/_generated/component.js";
  * records for subscription payments.
  */
 const RECENT_SUBSCRIPTION_WINDOW_SECONDS = 10 * 60; // 10 minutes
+
+/**
+ * Extract the string ID from a Stripe expandable field.
+ * Stripe API responses can contain either a string ID or an expanded object.
+ * This helper safely extracts the ID in either case.
+ */
+function toId(
+  field: string | { id: string } | null | undefined,
+): string | undefined {
+  if (!field) return undefined;
+  if (typeof field === "string") return field;
+  return field.id;
+}
+
+/**
+ * Extract the subscription ID from an Invoice.
+ * In Stripe SDK v22 (Dahlia), the subscription is nested under parent.subscription_details.
+ */
+function getInvoiceSubscriptionId(
+  invoice: StripeSDK.Invoice,
+): string | undefined {
+  const subscriptionDetails = invoice.parent?.subscription_details;
+  if (!subscriptionDetails) return undefined;
+  return toId(subscriptionDetails.subscription);
+}
 
 export type StripeComponent = ComponentApi;
 
@@ -178,8 +204,8 @@ export class StripeSubscriptions {
       /** Metadata to attach to the payment intent (only for mode: "payment") */
       paymentIntentMetadata?: Record<string, string>;
       allowPromotionCodes?: boolean;
-      /** https://docs.stripe.com/changelog/dahlia/2026-03-25/updates-available-checkout-session-ui-modes */
-      uiMode?: "elements" | "embedded_page" | "hosted_page";
+      /** UI mode for the checkout session. See: https://docs.stripe.com/changelog/dahlia/2026-03-25/updates-available-checkout-session-ui-modes */
+      uiMode?: StripeSDK.Checkout.SessionCreateParams["ui_mode"];
     },
   ) {
     const stripe = new StripeSDK(this.apiKey);
@@ -458,10 +484,8 @@ export function registerRoutes(
         }
 
         // Call custom event handler if provided
-        const eventType = event.type;
-        const customHandler:
-          | ((ctx: any, event: any) => Promise<void>)
-          | undefined = eventHandlers[eventType] as any;
+        // Note: Using type assertion to avoid complex union type issues with StripeEventHandlers
+        const customHandler = (eventHandlers as Record<string, StripeEventHandler | undefined>)[event.type];
         if (customHandler) {
           await customHandler(ctx, event);
         }
@@ -512,7 +536,7 @@ async function processEvent(
 
       await ctx.runMutation(component.private.handleSubscriptionCreated, {
         stripeSubscriptionId: subscription.id,
-        stripeCustomerId: subscription.customer as string,
+        stripeCustomerId: toId(subscription.customer) || "",
         status: subscription.status,
         currentPeriodEnd: item?.current_period_end || 0,
         cancelAtPeriodEnd: subscription.cancel_at_period_end ?? false,
@@ -555,11 +579,13 @@ async function processEvent(
 
     case "checkout.session.completed": {
       const session = event.data.object as StripeSDK.Checkout.Session;
+      const sessionCustomerId = toId(session.customer);
+      const sessionPaymentIntentId = toId(session.payment_intent);
+      const sessionSubscriptionId = toId(session.subscription);
+
       await ctx.runMutation(component.private.handleCheckoutSessionCompleted, {
         stripeCheckoutSessionId: session.id,
-        stripeCustomerId: session.customer
-          ? (session.customer as string)
-          : undefined,
+        stripeCustomerId: sessionCustomerId,
         mode: session.mode || "payment",
         metadata: session.metadata || undefined,
       });
@@ -567,28 +593,28 @@ async function processEvent(
       // For payment mode, link the payment to the customer if we have both
       if (
         session.mode === "payment" &&
-        session.customer &&
-        session.payment_intent
+        sessionCustomerId &&
+        sessionPaymentIntentId
       ) {
         await ctx.runMutation(component.private.updatePaymentCustomer, {
-          stripePaymentIntentId: session.payment_intent as string,
-          stripeCustomerId: session.customer as string,
+          stripePaymentIntentId: sessionPaymentIntentId,
+          stripeCustomerId: sessionCustomerId,
         });
       }
 
       // For subscription mode, fetch and store the latest invoice
-      if (session.mode === "subscription" && session.subscription) {
+      if (session.mode === "subscription" && sessionSubscriptionId) {
         try {
           const subscription = await stripe.subscriptions.retrieve(
-            session.subscription as string,
+            sessionSubscriptionId,
           );
-          if (subscription.latest_invoice) {
-            const invoice = await stripe.invoices.retrieve(
-              subscription.latest_invoice as string,
-            );
+          const latestInvoiceId = toId(subscription.latest_invoice);
+          if (latestInvoiceId) {
+            const invoice = await stripe.invoices.retrieve(latestInvoiceId);
+            const invoiceCustomerId = toId(invoice.customer);
             await ctx.runMutation(component.private.handleInvoiceCreated, {
               stripeInvoiceId: invoice.id,
-              stripeCustomerId: invoice.customer as string,
+              stripeCustomerId: invoiceCustomerId || "",
               stripeSubscriptionId: subscription.id,
               status: invoice.status || "paid",
               amountDue: invoice.amount_due,
@@ -608,10 +634,8 @@ async function processEvent(
       const invoice = event.data.object as StripeSDK.Invoice;
       await ctx.runMutation(component.private.handleInvoiceCreated, {
         stripeInvoiceId: invoice.id,
-        stripeCustomerId: invoice.customer as string,
-        stripeSubscriptionId: (invoice as any).subscription as
-          | string
-          | undefined,
+        stripeCustomerId: toId(invoice.customer) || "",
+        stripeSubscriptionId: getInvoiceSubscriptionId(invoice),
         status: invoice.status || "open",
         amountDue: invoice.amount_due,
         amountPaid: invoice.amount_paid,
@@ -622,7 +646,7 @@ async function processEvent(
 
     case "invoice.paid":
     case "invoice.payment_succeeded": {
-      const invoice = event.data.object as any;
+      const invoice = event.data.object as StripeSDK.Invoice;
       await ctx.runMutation(component.private.handleInvoicePaid, {
         stripeInvoiceId: invoice.id,
         amountPaid: invoice.amount_paid,
@@ -639,31 +663,16 @@ async function processEvent(
     }
 
     case "payment_intent.succeeded": {
-      const paymentIntent = event.data.object as any;
+      const paymentIntent = event.data.object as StripeSDK.PaymentIntent;
+      const customerId = toId(paymentIntent.customer);
 
-      // Check if this is a subscription payment
-      if (paymentIntent.invoice) {
-        try {
-          const invoice = await stripe.invoices.retrieve(
-            paymentIntent.invoice as string,
-          );
-          if ((invoice as any).subscription) {
-            console.log(
-              "⏭️ Skipping payment_intent.succeeded - subscription payment",
-            );
-            break;
-          }
-        } catch (err) {
-          console.error("Error checking invoice:", err);
-        }
-      }
-
-      // Check for recent subscriptions
-      if (paymentIntent.customer) {
+      // Check for recent subscriptions to avoid duplicate payment records
+      // for subscription-related payment intents
+      if (customerId) {
         const recentSubscriptions = await ctx.runQuery(
           component.private.listSubscriptionsWithCreationTime,
           {
-            stripeCustomerId: paymentIntent.customer as string,
+            stripeCustomerId: customerId,
           },
         );
 
@@ -683,9 +692,7 @@ async function processEvent(
 
       await ctx.runMutation(component.private.handlePaymentIntentSucceeded, {
         stripePaymentIntentId: paymentIntent.id,
-        stripeCustomerId: paymentIntent.customer
-          ? (paymentIntent.customer as string)
-          : undefined,
+        stripeCustomerId: customerId,
         amount: paymentIntent.amount,
         currency: paymentIntent.currency,
         status: paymentIntent.status,
