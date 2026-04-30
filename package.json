@@ -16,7 +16,7 @@
   "scripts": {
     "dev": "convex dev --start 'npm run dev:build'",
     "dev:frontend": "cd example && vite --clearScreen false",
-    "dev:build": "chokidar 'tsconfig*.json' 'src/**/*.ts' -i '**/*.test.ts' -c 'npm run build:codegen' --initial",
+    "dev:build": "npm run build:codegen",
     "predev": "convex init && npm run build:codegen",
     "build": "tsc --project ./tsconfig.build.json",
     "build:codegen": "npx convex codegen --component-dir ./src/component && npm run build",
@@ -70,7 +70,6 @@
     "@types/react-dom": "18.3.7",
     "@vercel/analytics": "2.0.1",
     "@vitejs/plugin-react": "5.2.0",
-    "chokidar-cli": "3.0.0",
     "convex": "1.36.1",
     "convex-test": "0.0.50",
     "eslint": "9.39.4",
