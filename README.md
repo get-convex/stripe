@@ -437,7 +437,3 @@ Check the Convex logs in your dashboard for errors. Common issues:
 - Wrong webhook URL (should be
   `https://<deployment>.convex.site/stripe/webhook`)
 - Missing events in webhook configuration
-
-## License
-
-Apache-2.0
