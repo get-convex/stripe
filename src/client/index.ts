@@ -178,7 +178,8 @@ export class StripeSubscriptions {
       /** Metadata to attach to the payment intent (only for mode: "payment") */
       paymentIntentMetadata?: Record<string, string>;
       allowPromotionCodes?: boolean;
-      uiMode?: "custom" | "embedded" | "hosted";
+      /** https://docs.stripe.com/changelog/dahlia/2026-03-25/updates-available-checkout-session-ui-modes */
+      uiMode?: "elements" | "embedded_page" | "hosted_page";
     },
   ) {
     const stripe = new StripeSDK(this.apiKey);
