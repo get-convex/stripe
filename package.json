@@ -65,7 +65,7 @@
     "@edge-runtime/vm": "5.0.0",
     "@eslint/eslintrc": "3.3.1",
     "@eslint/js": "9.39.2",
-    "@types/node": "20.19.25",
+    "@types/node": "24.12.2",
     "@types/react": "18.3.27",
     "@types/react-dom": "18.3.7",
     "@vercel/analytics": "1.5.0",
