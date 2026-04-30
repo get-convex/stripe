@@ -8,14 +8,16 @@ const stripeMocks = vi.hoisted(() => ({
 }));
 
 vi.mock("stripe", () => ({
-  default: vi.fn().mockImplementation(() => ({
-    subscriptions: {
-      retrieve: stripeMocks.retrieveSubscription,
-    },
-    subscriptionItems: {
-      update: stripeMocks.updateSubscriptionItem,
-    },
-  })),
+  default: vi.fn().mockImplementation(function () {
+    return {
+      subscriptions: {
+        retrieve: stripeMocks.retrieveSubscription,
+      },
+      subscriptionItems: {
+        update: stripeMocks.updateSubscriptionItem,
+      },
+    };
+  }),
 }));
 
 describe("StripeSubscriptions client", () => {
