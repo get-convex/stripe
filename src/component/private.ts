@@ -352,6 +352,20 @@ export const handleCheckoutSessionCompleted = mutation({
   },
 });
 
+const INVOICE_STATUS_ORDER: Record<string, number> = {
+  draft: 0,
+  open: 1,
+  paid: 2,
+  uncollectible: 2,
+  void: 2,
+};
+
+function latestInvoiceStatus(existingStatus: string, incomingStatus: string) {
+  const existingOrder = INVOICE_STATUS_ORDER[existingStatus] ?? 0;
+  const incomingOrder = INVOICE_STATUS_ORDER[incomingStatus] ?? 0;
+  return incomingOrder >= existingOrder ? incomingStatus : existingStatus;
+}
+
 export const handleInvoiceCreated = mutation({
   args: {
     stripeInvoiceId: v.string(),
@@ -396,7 +410,7 @@ export const handleInvoiceCreated = mutation({
         ...(args.stripeSubscriptionId !== undefined && {
           stripeSubscriptionId: args.stripeSubscriptionId,
         }),
-        status: args.status,
+        status: latestInvoiceStatus(existing.status, args.status),
         amountDue: args.amountDue,
         amountPaid: args.amountPaid,
         created: args.created,

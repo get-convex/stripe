@@ -126,6 +126,7 @@ export class StripeSubscriptions {
     const item = subscription.items.data[0];
     await ctx.runMutation(this.component.private.handleSubscriptionUpdated, {
       stripeSubscriptionId: subscription.id,
+      stripeCustomerId: getStripeObjectId(subscription.customer),
       status: subscription.status,
       currentPeriodEnd: item?.current_period_end || 0,
       cancelAtPeriodEnd: subscription.cancel_at_period_end ?? false,
@@ -162,6 +163,7 @@ export class StripeSubscriptions {
     const item = subscription.items.data[0];
     await ctx.runMutation(this.component.private.handleSubscriptionUpdated, {
       stripeSubscriptionId: subscription.id,
+      stripeCustomerId: getStripeObjectId(subscription.customer),
       status: subscription.status,
       currentPeriodEnd: item?.current_period_end || 0,
       cancelAtPeriodEnd: subscription.cancel_at_period_end ?? false,
@@ -761,6 +763,10 @@ function getInvoiceSubscriptionId(invoice: StripeSDK.Invoice) {
     return legacySubscription.id;
   }
   return undefined;
+}
+
+function getStripeObjectId(object: string | { id: string }) {
+  return typeof object === "string" ? object : object.id;
 }
 
 function getInvoiceMetadata(invoice: StripeSDK.Invoice) {

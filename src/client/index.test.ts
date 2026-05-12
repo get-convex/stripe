@@ -6,6 +6,8 @@ import { components } from "./setup.test.js";
 
 const stripeMocks = vi.hoisted(() => ({
   retrieveSubscription: vi.fn(),
+  updateSubscription: vi.fn(),
+  cancelSubscription: vi.fn(),
   updateSubscriptionItem: vi.fn(),
   createCheckoutSession: vi.fn(),
 }));
@@ -14,6 +16,8 @@ vi.mock("stripe", () => ({
   default: vi.fn().mockImplementation(() => ({
     subscriptions: {
       retrieve: stripeMocks.retrieveSubscription,
+      update: stripeMocks.updateSubscription,
+      cancel: stripeMocks.cancelSubscription,
     },
     subscriptionItems: {
       update: stripeMocks.updateSubscriptionItem,
@@ -123,6 +127,93 @@ describe("StripeSubscriptions client", () => {
       },
     );
     expect(ctx.runAction).not.toHaveBeenCalled();
+  });
+
+  test("cancelSubscription includes customer ID when syncing subscription", async () => {
+    stripeMocks.updateSubscription.mockResolvedValue({
+      id: "sub_cancel",
+      customer: "cus_cancel",
+      status: "active",
+      cancel_at_period_end: true,
+      cancel_at: 1_800_000_000,
+      metadata: { userId: "user_cancel" },
+      items: {
+        data: [
+          {
+            current_period_end: 1_800_000_000,
+            quantity: 3,
+            price: { id: "price_cancel" },
+          },
+        ],
+      },
+    });
+
+    const ctx = {
+      runAction: vi.fn(),
+      runMutation: vi.fn().mockResolvedValue(null),
+      runQuery: vi.fn(),
+    };
+    const client = new StripeSubscriptions(components.stripe, {
+      STRIPE_SECRET_KEY: "sk_test_123",
+    });
+
+    await client.cancelSubscription(ctx, {
+      stripeSubscriptionId: "sub_cancel",
+      cancelAtPeriodEnd: true,
+    });
+
+    expect(ctx.runMutation).toHaveBeenCalledWith(
+      components.stripe.private.handleSubscriptionUpdated,
+      expect.any(Object),
+    );
+    expect(ctx.runMutation.mock.calls[0][1]).toMatchObject({
+      stripeSubscriptionId: "sub_cancel",
+      stripeCustomerId: "cus_cancel",
+      priceId: "price_cancel",
+    });
+  });
+
+  test("reactivateSubscription includes customer ID when syncing subscription", async () => {
+    stripeMocks.updateSubscription.mockResolvedValue({
+      id: "sub_reactivate",
+      customer: "cus_reactivate",
+      status: "active",
+      cancel_at_period_end: false,
+      cancel_at: null,
+      metadata: { userId: "user_reactivate" },
+      items: {
+        data: [
+          {
+            current_period_end: 1_800_000_000,
+            quantity: 2,
+            price: { id: "price_reactivate" },
+          },
+        ],
+      },
+    });
+
+    const ctx = {
+      runAction: vi.fn(),
+      runMutation: vi.fn().mockResolvedValue(null),
+      runQuery: vi.fn(),
+    };
+    const client = new StripeSubscriptions(components.stripe, {
+      STRIPE_SECRET_KEY: "sk_test_123",
+    });
+
+    await client.reactivateSubscription(ctx, {
+      stripeSubscriptionId: "sub_reactivate",
+    });
+
+    expect(ctx.runMutation).toHaveBeenCalledWith(
+      components.stripe.private.handleSubscriptionUpdated,
+      expect.any(Object),
+    );
+    expect(ctx.runMutation.mock.calls[0][1]).toMatchObject({
+      stripeSubscriptionId: "sub_reactivate",
+      stripeCustomerId: "cus_reactivate",
+      priceId: "price_reactivate",
+    });
   });
 
   test("passes additional checkout session params without allowing mode override", async () => {
