@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+- Upgrade Stripe Node SDK dependency to v22.
+- Add optional Stripe API version configuration.
+- Add Checkout session params passthrough.
+- Improve webhook robustness for subscription updates, invoice upserts, invoice
+  metadata linking, and customer deletion PII scrubbing.
+- Refresh vulnerable dev/example dependencies without major toolchain upgrades.
+
 ## 0.1.4
 
 - Fix subscription quantity updates outside component actions

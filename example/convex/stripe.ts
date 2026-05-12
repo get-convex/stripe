@@ -452,7 +452,7 @@ export const getCustomerPortalUrl = action({
     }),
     v.null(),
   ),
-  handler: async (ctx, args) => {
+  handler: async (ctx) => {
     const identity = await ctx.auth.getUserIdentity();
     if (!identity) throw new Error("Not authenticated");
 
@@ -577,7 +577,7 @@ export const getUserSubscriptions = query({
       orgId: v.optional(v.string()),
     }),
   ),
-  handler: async (ctx, args) => {
+  handler: async (ctx) => {
     const identity = await ctx.auth.getUserIdentity();
     if (!identity) return [];
 
@@ -606,7 +606,7 @@ export const getUserPayments = query({
       orgId: v.optional(v.string()),
     }),
   ),
-  handler: async (ctx, args) => {
+  handler: async (ctx) => {
     const identity = await ctx.auth.getUserIdentity();
     if (!identity) return [];
 
@@ -629,7 +629,7 @@ export const getFailedPaymentSubscriptions = query({
       currentPeriodEnd: v.number(),
     }),
   ),
-  handler: async (ctx, args) => {
+  handler: async (ctx) => {
     const identity = await ctx.auth.getUserIdentity();
     if (!identity) return [];
 

@@ -1,10 +1,13 @@
 import { describe, expect, test, vi } from "vitest";
+import StripeSDK from "stripe";
+import * as clientModule from "./index.js";
 import { StripeSubscriptions, registerRoutes } from "./index.js";
 import { components } from "./setup.test.js";
 
 const stripeMocks = vi.hoisted(() => ({
   retrieveSubscription: vi.fn(),
   updateSubscriptionItem: vi.fn(),
+  createCheckoutSession: vi.fn(),
 }));
 
 vi.mock("stripe", () => ({
@@ -14,6 +17,11 @@ vi.mock("stripe", () => ({
     },
     subscriptionItems: {
       update: stripeMocks.updateSubscriptionItem,
+    },
+    checkout: {
+      sessions: {
+        create: stripeMocks.createCheckoutSession,
+      },
     },
   })),
 }));
@@ -32,6 +40,37 @@ describe("StripeSubscriptions client", () => {
     expect(client).toBeDefined();
     // The apiKey getter should return the provided key
     expect(client.apiKey).toBe("sk_test_123");
+  });
+
+  test("should pass Stripe client configuration options to the SDK", async () => {
+    vi.mocked(StripeSDK).mockClear();
+    stripeMocks.createCheckoutSession.mockResolvedValue({
+      id: "cs_config",
+      url: "https://checkout.stripe.com/c/pay/cs_config",
+    });
+
+    const client = new StripeSubscriptions(components.stripe, {
+      STRIPE_SECRET_KEY: "sk_test_123",
+      apiVersion: "2026-04-22.dahlia",
+    });
+
+    await client.createCheckoutSession(
+      {
+        runAction: vi.fn(),
+        runMutation: vi.fn(),
+        runQuery: vi.fn(),
+      },
+      {
+        priceId: "price_123",
+        mode: "payment",
+        successUrl: "https://example.com/success",
+        cancelUrl: "https://example.com/cancel",
+      },
+    );
+
+    expect(StripeSDK).toHaveBeenCalledWith("sk_test_123", {
+      apiVersion: "2026-04-22.dahlia",
+    });
   });
 
   test("should throw error when accessing apiKey without key set", async () => {
@@ -85,10 +124,152 @@ describe("StripeSubscriptions client", () => {
     );
     expect(ctx.runAction).not.toHaveBeenCalled();
   });
+
+  test("passes additional checkout session params without allowing mode override", async () => {
+    stripeMocks.createCheckoutSession.mockResolvedValue({
+      id: "cs_test_123",
+      url: "https://checkout.stripe.com/c/pay/cs_test_123",
+    });
+
+    const client = new StripeSubscriptions(components.stripe, {
+      STRIPE_SECRET_KEY: "sk_test_123",
+    });
+
+    const result = await client.createCheckoutSession(
+      {
+        runAction: vi.fn(),
+        runMutation: vi.fn(),
+        runQuery: vi.fn(),
+      },
+      {
+        priceId: "price_monthly",
+        customerId: "cus_123",
+        mode: "subscription",
+        successUrl: "https://example.com/success",
+        cancelUrl: "https://example.com/cancel",
+        quantity: 2,
+        metadata: { source: "test" },
+        subscriptionMetadata: { userId: "user_123" },
+        params: {
+          mode: "payment",
+          allow_promotion_codes: true,
+          line_items: [{ price: "price_override", quantity: 5 }],
+        },
+      },
+    );
+
+    expect(stripeMocks.createCheckoutSession).toHaveBeenCalledWith({
+      mode: "subscription",
+      line_items: [{ price: "price_override", quantity: 5 }],
+      success_url: "https://example.com/success",
+      cancel_url: "https://example.com/cancel",
+      metadata: { source: "test" },
+      customer: "cus_123",
+      subscription_data: { metadata: { userId: "user_123" } },
+      allow_promotion_codes: true,
+    });
+    expect(result).toEqual({
+      sessionId: "cs_test_123",
+      url: "https://checkout.stripe.com/c/pay/cs_test_123",
+    });
+  });
+
+  test("omits hosted redirect URLs for non-hosted checkout ui modes", async () => {
+    stripeMocks.createCheckoutSession.mockResolvedValue({
+      id: "cs_embedded",
+      url: null,
+    });
+
+    const client = new StripeSubscriptions(components.stripe, {
+      STRIPE_SECRET_KEY: "sk_test_123",
+    });
+
+    await client.createCheckoutSession(
+      {
+        runAction: vi.fn(),
+        runMutation: vi.fn(),
+        runQuery: vi.fn(),
+      },
+      {
+        priceId: "price_monthly",
+        mode: "subscription",
+        successUrl: "https://example.com/success",
+        cancelUrl: "https://example.com/cancel",
+        params: {
+          ui_mode: "embedded_page",
+          return_url: "https://example.com/return",
+        },
+      },
+    );
+
+    expect(stripeMocks.createCheckoutSession).toHaveBeenCalledWith({
+      mode: "subscription",
+      line_items: [{ price: "price_monthly", quantity: 1 }],
+      metadata: {},
+      ui_mode: "embedded_page",
+      return_url: "https://example.com/return",
+    });
+  });
 });
 
 describe("registerRoutes", () => {
   test("registerRoutes function should be exported", () => {
     expect(typeof registerRoutes).toBe("function");
+  });
+});
+
+describe("processEvent", () => {
+  test("links v22 invoice events through parent subscription details", async () => {
+    const processEvent = (clientModule as any).processEvent;
+    const ctx = {
+      runMutation: vi.fn().mockResolvedValue(null),
+      runQuery: vi.fn(),
+    };
+
+    await processEvent(
+      ctx,
+      components.stripe,
+      {
+        type: "invoice.created",
+        data: {
+          object: {
+            id: "in_v22",
+            customer: "cus_v22",
+            status: "open",
+            amount_due: 1234,
+            amount_paid: 0,
+            created: 1_700_000_001,
+            metadata: {},
+            parent: {
+              subscription_details: {
+                subscription: "sub_v22",
+                metadata: {
+                  userId: "user_v22",
+                  orgId: "org_v22",
+                },
+              },
+            },
+          },
+        },
+      },
+      {},
+    );
+
+    expect(ctx.runMutation).toHaveBeenCalledWith(
+      components.stripe.private.handleInvoiceCreated,
+      {
+        stripeInvoiceId: "in_v22",
+        stripeCustomerId: "cus_v22",
+        stripeSubscriptionId: "sub_v22",
+        status: "open",
+        amountDue: 1234,
+        amountPaid: 0,
+        created: 1_700_000_001,
+        metadata: {
+          userId: "user_v22",
+          orgId: "org_v22",
+        },
+      },
+    );
   });
 });
