@@ -6,6 +6,13 @@ import type {
   GenericQueryCtx,
 } from "convex/server";
 import type Stripe from "stripe";
+import type StripeSDK from "stripe";
+
+type StripeClientConfig = ConstructorParameters<typeof StripeSDK>[1];
+export type StripeApiVersion =
+  | NonNullable<StripeClientConfig>["apiVersion"]
+  | (string & {})
+  | null;
 
 // Type utils follow
 
@@ -72,6 +79,12 @@ export type RegisterRoutesConfig = {
    * Defaults to process.env.STRIPE_SECRET_KEY
    */
   STRIPE_SECRET_KEY?: string;
+
+  /**
+   * Optional Stripe API version for the webhook Stripe client.
+   * Defaults to the API version bundled with the installed Stripe SDK.
+   */
+  apiVersion?: StripeApiVersion;
 };
 
 /**

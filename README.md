@@ -175,8 +175,15 @@ import { StripeSubscriptions } from "@convex-dev/stripe";
 
 const stripeClient = new StripeSubscriptions(components.stripe, {
   STRIPE_SECRET_KEY: "sk_...", // Optional, defaults to process.env.STRIPE_SECRET_KEY
+  apiVersion: "2026-04-22.dahlia", // Optional Stripe API version pin
 });
 ```
+
+This package uses Stripe's Node SDK v22, which requires Node.js 18 or newer.
+You can pass `apiVersion` if your app needs to pin a specific Stripe API
+version instead of using the version bundled with the installed SDK. Stripe's
+TypeScript types model the latest API version, so older pinned versions can have
+runtime shapes that differ from the SDK types.
 
 #### Methods
 
@@ -203,8 +210,21 @@ await stripeClient.createCheckoutSession(ctx, {
   metadata: {},                     // Optional, session metadata
   subscriptionMetadata: {},         // Optional, attached to subscription
   paymentIntentMetadata: {},        // Optional, attached to payment intent
+  params: {
+    allow_promotion_codes: true,
+    ui_mode: "embedded_page",
+    return_url: "https://...",
+    automatic_tax: { enabled: true },
+  },                                // Optional Stripe Checkout params
 });
 ```
+
+`params` is passed through to Stripe Checkout and can be used for options like
+promotion codes, discounts, automatic tax, embedded checkout, custom fields, or
+custom line items. The component keeps `mode` from the top-level argument so
+webhook routing remains consistent. For non-hosted Checkout UI modes such as
+`embedded_page` or `elements`, the component omits `successUrl` and `cancelUrl`
+from the Stripe request; pass `return_url` through `params` instead.
 
 ### Component Queries
 
