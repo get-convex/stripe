@@ -124,7 +124,12 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
       handleSubscriptionDeleted: FunctionReference<
         "mutation",
         "internal",
-        { stripeSubscriptionId: string },
+        {
+          cancelAt?: number;
+          cancelAtPeriodEnd?: boolean;
+          currentPeriodEnd?: number;
+          stripeSubscriptionId: string;
+        },
         null,
         Name
       >;
@@ -142,6 +147,18 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
           stripeSubscriptionId: string;
         },
         null,
+        Name
+      >;
+      listSubscriptionsWithCreationTime: FunctionReference<
+        "query",
+        "internal",
+        { stripeCustomerId: string },
+        Array<{
+          _creationTime: number;
+          status: string;
+          stripeCustomerId: string;
+          stripeSubscriptionId: string;
+        }>,
         Name
       >;
       updatePaymentCustomer: FunctionReference<
@@ -172,6 +189,19 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
         string,
         Name
       >;
+      getCheckoutSession: FunctionReference<
+        "query",
+        "internal",
+        { stripeCheckoutSessionId: string },
+        {
+          metadata?: any;
+          mode: string;
+          status: string;
+          stripeCheckoutSessionId: string;
+          stripeCustomerId?: string;
+        } | null,
+        Name
+      >;
       getCustomer: FunctionReference<
         "query",
         "internal",
@@ -181,6 +211,33 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
           metadata?: any;
           name?: string;
           stripeCustomerId: string;
+          userId?: string;
+        } | null,
+        Name
+      >;
+      getCustomerByEmail: FunctionReference<
+        "query",
+        "internal",
+        { email: string },
+        {
+          email?: string;
+          metadata?: any;
+          name?: string;
+          stripeCustomerId: string;
+          userId?: string;
+        } | null,
+        Name
+      >;
+      getCustomerByUserId: FunctionReference<
+        "query",
+        "internal",
+        { userId: string },
+        {
+          email?: string;
+          metadata?: any;
+          name?: string;
+          stripeCustomerId: string;
+          userId?: string;
         } | null,
         Name
       >;
@@ -237,6 +294,19 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
           stripeSubscriptionId: string;
           userId?: string;
         } | null,
+        Name
+      >;
+      listCheckoutSessions: FunctionReference<
+        "query",
+        "internal",
+        { stripeCustomerId: string },
+        Array<{
+          metadata?: any;
+          mode: string;
+          status: string;
+          stripeCheckoutSessionId: string;
+          stripeCustomerId?: string;
+        }>,
         Name
       >;
       listInvoices: FunctionReference<
@@ -360,6 +430,25 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
         }>,
         Name
       >;
+      listSubscriptionsByOrgId: FunctionReference<
+        "query",
+        "internal",
+        { orgId: string },
+        Array<{
+          cancelAt?: number;
+          cancelAtPeriodEnd: boolean;
+          currentPeriodEnd: number;
+          metadata?: any;
+          orgId?: string;
+          priceId: string;
+          quantity?: number;
+          status: string;
+          stripeCustomerId: string;
+          stripeSubscriptionId: string;
+          userId?: string;
+        }>,
+        Name
+      >;
       listSubscriptionsByUserId: FunctionReference<
         "query",
         "internal",
@@ -394,7 +483,7 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
       updateSubscriptionQuantity: FunctionReference<
         "action",
         "internal",
-        { apiKey: string; quantity: number; stripeSubscriptionId: string },
+        { quantity: number; stripeSubscriptionId: string },
         null,
         Name
       >;
