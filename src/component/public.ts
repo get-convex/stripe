@@ -334,7 +334,7 @@ export const createOrUpdateCustomer = mutation({
     const userId = metadata.userId as string | undefined;
 
     if (existing) {
-      await ctx.db.patch(existing._id, {
+      await ctx.db.patch("customers", existing._id, {
         ...(args.email !== undefined && { email: args.email }),
         ...(args.name !== undefined && { name: args.name }),
         ...(args.metadata !== undefined && { metadata: args.metadata }),
@@ -380,7 +380,7 @@ export const updateSubscriptionMetadata = mutation({
       );
     }
 
-    await ctx.db.patch(subscription._id, {
+    await ctx.db.patch("subscriptions", subscription._id, {
       metadata: args.metadata,
       ...(args.orgId !== undefined && { orgId: args.orgId }),
       ...(args.userId !== undefined && { userId: args.userId }),
