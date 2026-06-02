@@ -50,7 +50,7 @@ export const updateSubscriptionQuantityInternal = mutation({
       .unique();
 
     if (subscription) {
-      await ctx.db.patch(subscription._id, {
+      await ctx.db.patch("subscriptions", subscription._id, {
         quantity: args.quantity,
       });
     }
@@ -108,7 +108,7 @@ export const handleCustomerUpdated = mutation({
       .unique();
 
     if (customer) {
-      await ctx.db.patch(customer._id, {
+      await ctx.db.patch("customers", customer._id, {
         email: args.email,
         name: args.name,
         metadata: args.metadata,
@@ -187,7 +187,7 @@ export const handleSubscriptionCreated = mutation({
 
       for (const invoice of invoices) {
         if (!invoice.orgId || !invoice.userId) {
-          await ctx.db.patch(invoice._id, {
+          await ctx.db.patch("invoices", invoice._id, {
             ...(orgId && !invoice.orgId && { orgId }),
             ...(userId && !invoice.userId && { userId }),
           });
@@ -228,7 +228,7 @@ export const handleSubscriptionUpdated = mutation({
       const cancelAtPeriodEnd = args.cancelAtPeriodEnd || 
         deriveCancelAtPeriodEnd(args.cancelAt, args.currentPeriodEnd);
 
-      await ctx.db.patch(subscription._id, {
+      await ctx.db.patch("subscriptions", subscription._id, {
         status: args.status,
         currentPeriodEnd: args.currentPeriodEnd,
         cancelAtPeriodEnd: cancelAtPeriodEnd,
@@ -263,7 +263,7 @@ export const handleSubscriptionDeleted = mutation({
       .unique();
 
     if (subscription) {
-      await ctx.db.patch(subscription._id, {
+      await ctx.db.patch("subscriptions", subscription._id, {
         status: "canceled",
         ...(args.cancelAtPeriodEnd !== undefined && {
           cancelAtPeriodEnd: args.cancelAtPeriodEnd,
@@ -296,7 +296,7 @@ export const handleCheckoutSessionCompleted = mutation({
       .unique();
 
     if (existing) {
-      await ctx.db.patch(existing._id, {
+      await ctx.db.patch("checkout_sessions", existing._id, {
         status: "complete",
         stripeCustomerId: args.stripeCustomerId,
       });
@@ -384,7 +384,7 @@ export const handleInvoicePaid = mutation({
       .unique();
 
     if (invoice) {
-      await ctx.db.patch(invoice._id, {
+      await ctx.db.patch("invoices", invoice._id, {
         status: "paid",
         amountPaid: args.amountPaid,
       });
@@ -408,7 +408,7 @@ export const handleInvoicePaymentFailed = mutation({
       .unique();
 
     if (invoice) {
-      await ctx.db.patch(invoice._id, {
+      await ctx.db.patch("invoices", invoice._id, {
         status: "open",
       });
     }
@@ -455,7 +455,7 @@ export const handlePaymentIntentSucceeded = mutation({
       });
     } else if (args.stripeCustomerId && !existing.stripeCustomerId) {
       // Update customer ID if it wasn't set initially (webhook timing issue)
-      await ctx.db.patch(existing._id, {
+      await ctx.db.patch("payments", existing._id, {
         stripeCustomerId: args.stripeCustomerId,
       });
     }
@@ -479,7 +479,7 @@ export const updatePaymentCustomer = mutation({
       .unique();
 
     if (payment && !payment.stripeCustomerId) {
-      await ctx.db.patch(payment._id, {
+      await ctx.db.patch("payments", payment._id, {
         stripeCustomerId: args.stripeCustomerId,
       });
     }
