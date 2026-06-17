@@ -533,6 +533,30 @@ test("delayed invoice.created does not overwrite paid invoice amounts", async ()
   });
 });
 
+test("delayed invoice.payment_failed does not downgrade paid invoice", async () => {
+  const t = convexTest(schema, modules);
+
+  await t.mutation(api.private.handleInvoiceCreated, {
+    stripeInvoiceId: "in_paid_then_failed",
+    stripeCustomerId: "cus_paid_then_failed",
+    status: "paid",
+    amountDue: 1500,
+    amountPaid: 1500,
+    created: 1_700_000_100,
+  });
+
+  await t.mutation(api.private.handleInvoicePaymentFailed, {
+    stripeInvoiceId: "in_paid_then_failed",
+  });
+
+  const invoices = await t.query(api.public.listInvoices, {
+    stripeCustomerId: "cus_paid_then_failed",
+  });
+
+  expect(invoices).toHaveLength(1);
+  expect(invoices[0].status).toBe("paid");
+});
+
 test("customer deletion scrubs PII but preserves linkage", async () => {
   const t = convexTest(schema, modules);
 

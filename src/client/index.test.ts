@@ -267,6 +267,89 @@ describe("StripeSubscriptions client", () => {
     });
   });
 
+  test("merges checkout params metadata without dropping linkage metadata", async () => {
+    stripeMocks.createCheckoutSession.mockResolvedValue({
+      id: "cs_metadata_merge",
+      url: "https://checkout.stripe.com/c/pay/cs_metadata_merge",
+    });
+
+    const client = new StripeSubscriptions(components.stripe, {
+      STRIPE_SECRET_KEY: "sk_test_123",
+    });
+
+    await client.createCheckoutSession(
+      {
+        runAction: vi.fn(),
+        runMutation: vi.fn(),
+        runQuery: vi.fn(),
+      },
+      {
+        priceId: "price_monthly",
+        mode: "subscription",
+        successUrl: "https://example.com/success",
+        cancelUrl: "https://example.com/cancel",
+        subscriptionMetadata: { userId: "user_123" },
+        params: {
+          subscription_data: {
+            metadata: { couponSource: "landing_page" },
+            trial_period_days: 14,
+          },
+        },
+      },
+    );
+
+    expect(stripeMocks.createCheckoutSession).toHaveBeenCalledWith(
+      expect.objectContaining({
+        subscription_data: {
+          metadata: {
+            couponSource: "landing_page",
+            userId: "user_123",
+          },
+          trial_period_days: 14,
+        },
+      }),
+    );
+
+    stripeMocks.createCheckoutSession.mockClear();
+    stripeMocks.createCheckoutSession.mockResolvedValue({
+      id: "cs_payment_metadata_merge",
+      url: "https://checkout.stripe.com/c/pay/cs_payment_metadata_merge",
+    });
+
+    await client.createCheckoutSession(
+      {
+        runAction: vi.fn(),
+        runMutation: vi.fn(),
+        runQuery: vi.fn(),
+      },
+      {
+        priceId: "price_one_time",
+        mode: "payment",
+        successUrl: "https://example.com/success",
+        cancelUrl: "https://example.com/cancel",
+        paymentIntentMetadata: { userId: "user_456" },
+        params: {
+          payment_intent_data: {
+            metadata: { productType: "hat" },
+            statement_descriptor: "BENJI HAT",
+          },
+        },
+      },
+    );
+
+    expect(stripeMocks.createCheckoutSession).toHaveBeenCalledWith(
+      expect.objectContaining({
+        payment_intent_data: {
+          metadata: {
+            productType: "hat",
+            userId: "user_456",
+          },
+          statement_descriptor: "BENJI HAT",
+        },
+      }),
+    );
+  });
+
   test("omits hosted redirect URLs for non-hosted checkout ui modes", async () => {
     stripeMocks.createCheckoutSession.mockResolvedValue({
       id: "cs_embedded",

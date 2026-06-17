@@ -232,7 +232,30 @@ export class StripeSubscriptions {
     }
 
     const { mode: _mode, ...paramsOverrides } = args.params || {};
-    const finalParams = { ...sessionParams, ...paramsOverrides };
+    const finalParams: StripeSDK.Checkout.SessionCreateParams = {
+      ...sessionParams,
+      ...paramsOverrides,
+    };
+    if (sessionParams.subscription_data || paramsOverrides.subscription_data) {
+      finalParams.subscription_data = {
+        ...sessionParams.subscription_data,
+        ...paramsOverrides.subscription_data,
+        metadata: {
+          ...(paramsOverrides.subscription_data?.metadata ?? {}),
+          ...(sessionParams.subscription_data?.metadata ?? {}),
+        },
+      };
+    }
+    if (sessionParams.payment_intent_data || paramsOverrides.payment_intent_data) {
+      finalParams.payment_intent_data = {
+        ...sessionParams.payment_intent_data,
+        ...paramsOverrides.payment_intent_data,
+        metadata: {
+          ...(paramsOverrides.payment_intent_data?.metadata ?? {}),
+          ...(sessionParams.payment_intent_data?.metadata ?? {}),
+        },
+      };
+    }
     if (isNonHostedCheckoutUiMode(finalParams.ui_mode)) {
       delete finalParams.success_url;
       delete finalParams.cancel_url;

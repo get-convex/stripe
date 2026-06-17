@@ -496,7 +496,7 @@ export const handleInvoicePaymentFailed = mutation({
 
     if (invoice) {
       await ctx.db.patch("invoices", invoice._id, {
-        status: "open",
+        status: latestInvoiceStatus(invoice.status, "open"),
       });
     }
 
