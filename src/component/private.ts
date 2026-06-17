@@ -366,6 +366,15 @@ function latestInvoiceStatus(existingStatus: string, incomingStatus: string) {
   return incomingOrder >= existingOrder ? incomingStatus : existingStatus;
 }
 
+function shouldApplyInvoiceLifecycleFields(
+  existingStatus: string,
+  incomingStatus: string,
+) {
+  const existingOrder = INVOICE_STATUS_ORDER[existingStatus] ?? 0;
+  const incomingOrder = INVOICE_STATUS_ORDER[incomingStatus] ?? 0;
+  return incomingOrder >= existingOrder;
+}
+
 export const handleInvoiceCreated = mutation({
   args: {
     stripeInvoiceId: v.string(),
@@ -405,18 +414,28 @@ export const handleInvoiceCreated = mutation({
     }
 
     if (existing) {
+      const useIncomingLifecycleFields = shouldApplyInvoiceLifecycleFields(
+        existing.status,
+        args.status,
+      );
       await ctx.db.patch("invoices", existing._id, {
         stripeCustomerId: args.stripeCustomerId,
         ...(args.stripeSubscriptionId !== undefined && {
           stripeSubscriptionId: args.stripeSubscriptionId,
         }),
         status: latestInvoiceStatus(existing.status, args.status),
-        amountDue: args.amountDue,
-        amountPaid: args.amountPaid,
-        created: args.created,
-        metadata,
-        ...(orgId !== undefined && { orgId }),
-        ...(userId !== undefined && { userId }),
+        amountDue: useIncomingLifecycleFields
+          ? args.amountDue
+          : existing.amountDue,
+        amountPaid: useIncomingLifecycleFields
+          ? args.amountPaid
+          : existing.amountPaid,
+        created: useIncomingLifecycleFields ? args.created : existing.created,
+        metadata: useIncomingLifecycleFields ? metadata : existing.metadata,
+        ...(useIncomingLifecycleFields &&
+          orgId !== undefined && { orgId }),
+        ...(useIncomingLifecycleFields &&
+          userId !== undefined && { userId }),
       });
     } else {
       await ctx.db.insert("invoices", {

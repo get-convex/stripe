@@ -499,6 +499,40 @@ test("delayed invoice.created does not downgrade finalized invoice status", asyn
   expect(invoices[0].status).toBe("open");
 });
 
+test("delayed invoice.created does not overwrite paid invoice amounts", async () => {
+  const t = convexTest(schema, modules);
+
+  await t.mutation(api.private.handleInvoiceCreated, {
+    stripeInvoiceId: "in_paid_out_of_order",
+    stripeCustomerId: "cus_paid_out_of_order",
+    status: "paid",
+    amountDue: 1500,
+    amountPaid: 1500,
+    created: 1_700_000_100,
+  });
+
+  await t.mutation(api.private.handleInvoiceCreated, {
+    stripeInvoiceId: "in_paid_out_of_order",
+    stripeCustomerId: "cus_paid_out_of_order",
+    status: "draft",
+    amountDue: 1500,
+    amountPaid: 0,
+    created: 1_700_000_000,
+  });
+
+  const invoices = await t.query(api.public.listInvoices, {
+    stripeCustomerId: "cus_paid_out_of_order",
+  });
+
+  expect(invoices).toHaveLength(1);
+  expect(invoices[0]).toMatchObject({
+    status: "paid",
+    amountDue: 1500,
+    amountPaid: 1500,
+    created: 1_700_000_100,
+  });
+});
+
 test("customer deletion scrubs PII but preserves linkage", async () => {
   const t = convexTest(schema, modules);
 
