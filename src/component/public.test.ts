@@ -367,6 +367,165 @@ test("payment with orgId and userId extraction from metadata", async () => {
   });
 });
 
+test("subscription update upserts when created webhook is missing", async () => {
+  const t = convexTest(schema, modules);
+
+  await t.mutation(api.private.handleSubscriptionUpdated as any, {
+    stripeSubscriptionId: "sub_update_first",
+    stripeCustomerId: "cus_update_first",
+    status: "active",
+    currentPeriodEnd: 1_800_000_000,
+    cancelAtPeriodEnd: false,
+    quantity: 4,
+    priceId: "price_update_first",
+    metadata: { userId: "user_update_first", orgId: "org_update_first" },
+  });
+
+  const subscription = await t.query(api.public.getSubscription, {
+    stripeSubscriptionId: "sub_update_first",
+  });
+
+  expect(subscription).toMatchObject({
+    stripeSubscriptionId: "sub_update_first",
+    stripeCustomerId: "cus_update_first",
+    status: "active",
+    currentPeriodEnd: 1_800_000_000,
+    quantity: 4,
+    priceId: "price_update_first",
+    userId: "user_update_first",
+    orgId: "org_update_first",
+  });
+});
+
+test("invoice creation updates existing invoices and mirrors invoice metadata", async () => {
+  const t = convexTest(schema, modules);
+
+  await t.mutation(api.private.handleInvoiceCreated, {
+    stripeInvoiceId: "in_upsert",
+    stripeCustomerId: "cus_invoice_upsert",
+    status: "draft",
+    amountDue: 1000,
+    amountPaid: 0,
+    created: 1_700_000_000,
+    metadata: { userId: "user_initial", orgId: "org_initial" },
+  } as any);
+
+  await t.mutation(api.private.handleInvoiceCreated, {
+    stripeInvoiceId: "in_upsert",
+    stripeCustomerId: "cus_invoice_upsert",
+    status: "open",
+    amountDue: 1500,
+    amountPaid: 500,
+    created: 1_700_000_000,
+    metadata: { userId: "user_invoice_meta", orgId: "org_invoice_meta" },
+  } as any);
+
+  const invoices = await t.query(api.public.listInvoicesByOrgId, {
+    orgId: "org_invoice_meta",
+  });
+
+  expect(invoices).toHaveLength(1);
+  expect(invoices[0]).toMatchObject({
+    stripeInvoiceId: "in_upsert",
+    status: "open",
+    amountDue: 1500,
+    amountPaid: 500,
+    userId: "user_invoice_meta",
+    orgId: "org_invoice_meta",
+    metadata: { userId: "user_invoice_meta", orgId: "org_invoice_meta" },
+  });
+});
+
+test("invoice update can mirror metadata changes", async () => {
+  const t = convexTest(schema, modules);
+
+  await t.mutation(api.private.handleInvoiceCreated, {
+    stripeInvoiceId: "in_metadata_update",
+    stripeCustomerId: "cus_metadata_update",
+    status: "open",
+    amountDue: 1000,
+    amountPaid: 0,
+    created: 1_700_000_000,
+    metadata: { userId: "user_old" },
+  } as any);
+
+  await t.mutation(api.private.handleInvoiceCreated, {
+    stripeInvoiceId: "in_metadata_update",
+    stripeCustomerId: "cus_metadata_update",
+    status: "open",
+    amountDue: 1000,
+    amountPaid: 0,
+    created: 1_700_000_000,
+    metadata: { userId: "user_new", orgId: "org_new" },
+  } as any);
+
+  const invoices = await t.query(api.public.listInvoicesByOrgId, {
+    orgId: "org_new",
+  });
+
+  expect(invoices).toHaveLength(1);
+  expect(invoices[0].metadata).toEqual({
+    userId: "user_new",
+    orgId: "org_new",
+  });
+});
+
+test("delayed invoice.created does not downgrade finalized invoice status", async () => {
+  const t = convexTest(schema, modules);
+
+  await t.mutation(api.private.handleInvoiceCreated, {
+    stripeInvoiceId: "in_out_of_order",
+    stripeCustomerId: "cus_out_of_order",
+    status: "open",
+    amountDue: 1500,
+    amountPaid: 0,
+    created: 1_700_000_000,
+  });
+
+  await t.mutation(api.private.handleInvoiceCreated, {
+    stripeInvoiceId: "in_out_of_order",
+    stripeCustomerId: "cus_out_of_order",
+    status: "draft",
+    amountDue: 1500,
+    amountPaid: 0,
+    created: 1_700_000_000,
+  });
+
+  const invoices = await t.query(api.public.listInvoices, {
+    stripeCustomerId: "cus_out_of_order",
+  });
+
+  expect(invoices).toHaveLength(1);
+  expect(invoices[0].status).toBe("open");
+});
+
+test("customer deletion scrubs PII but preserves linkage", async () => {
+  const t = convexTest(schema, modules);
+
+  await t.mutation(api.private.handleCustomerCreated, {
+    stripeCustomerId: "cus_delete",
+    email: "delete@example.com",
+    name: "Delete Me",
+    metadata: { userId: "user_delete", tier: "pro" },
+  });
+
+  await t.mutation((api.private as any).handleCustomerDeleted, {
+    stripeCustomerId: "cus_delete",
+  });
+
+  const customer = await t.query(api.public.getCustomer, {
+    stripeCustomerId: "cus_delete",
+  });
+
+  expect(customer).toMatchObject({
+    stripeCustomerId: "cus_delete",
+    userId: "user_delete",
+    metadata: {},
+  });
+  expect(customer?.email).toBeUndefined();
+  expect(customer?.name).toBeUndefined();
+});
+
 test("list payments by customer ID", async () => {
   const t = convexTest(schema, modules);
 

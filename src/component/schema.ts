@@ -63,6 +63,7 @@ export default defineSchema({
     amountDue: v.number(),
     amountPaid: v.number(),
     created: v.number(),
+    metadata: v.optional(v.any()),
     // Custom lookup fields for efficient querying
     orgId: v.optional(v.string()),
     userId: v.optional(v.string()),

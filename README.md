@@ -7,6 +7,9 @@ into your Convex application.
 
 [![npm version](https://badge.fury.io/js/@convex-dev%2Fstripe.svg)](https://badge.fury.io/js/@convex-dev%2Fstripe)
 
+Requires Node.js 18 or later, matching the Stripe Node SDK v22 runtime
+requirement.
+
 ## Features
 
 - 🛒 **Checkout Sessions** - Create one-time payment and subscription checkouts
@@ -64,11 +67,13 @@ Add these to your [Convex Dashboard](https://dashboard.convex.dev) → Settings 
    - `checkout.session.completed`
    - `customer.created`
    - `customer.updated`
+   - `customer.deleted`
    - `customer.subscription.created`
    - `customer.subscription.updated`
    - `customer.subscription.deleted`
    - `invoice.created`
    - `invoice.finalized`
+   - `invoice.updated`
    - `invoice.paid`
    - `invoice.payment_failed`
    - `payment_intent.succeeded`
@@ -90,6 +95,7 @@ const http = httpRouter();
 // Register Stripe webhook handler at /stripe/webhook
 registerRoutes(http, components.stripe, {
   webhookPath: "/stripe/webhook",
+  apiVersion: "2026-04-22.dahlia", // Optional
 });
 
 export default http;
@@ -175,6 +181,7 @@ import { StripeSubscriptions } from "@convex-dev/stripe";
 
 const stripeClient = new StripeSubscriptions(components.stripe, {
   STRIPE_SECRET_KEY: "sk_...", // Optional, defaults to process.env.STRIPE_SECRET_KEY
+  apiVersion: "2026-04-22.dahlia", // Optional Stripe API version
 });
 ```
 
@@ -203,8 +210,20 @@ await stripeClient.createCheckoutSession(ctx, {
   metadata: {},                     // Optional, session metadata
   subscriptionMetadata: {},         // Optional, attached to subscription
   paymentIntentMetadata: {},        // Optional, attached to payment intent
+  params: {
+    allow_promotion_codes: true,
+    ui_mode: "embedded_page",
+    return_url: "https://...",
+  },                                // Optional Stripe Checkout Session params
 });
 ```
+
+`params` is a typed passthrough for Stripe Checkout Session fields that the
+component does not model directly. Fields in `params` override constructed
+defaults, except `mode`, which remains controlled by the top-level `mode`
+argument. For non-hosted Checkout UI modes, the component omits `successUrl` and
+`cancelUrl` from the Stripe request and expects redirect behavior to be supplied
+through Stripe-supported params such as `return_url`.
 
 ### Component Queries
 
@@ -267,13 +286,16 @@ The component automatically handles these Stripe webhook events:
 | ------------------------------- | ----------------------------------- |
 | `customer.created`              | Creates customer record             |
 | `customer.updated`              | Updates customer record             |
+| `customer.deleted`              | Scrubs customer PII                 |
 | `customer.subscription.created` | Creates subscription record         |
 | `customer.subscription.updated` | Updates subscription record         |
 | `customer.subscription.deleted` | Marks subscription as canceled      |
 | `payment_intent.succeeded`      | Creates payment record              |
 | `payment_intent.payment_failed` | Updates payment status              |
 | `invoice.created`               | Creates invoice record              |
-| `invoice.paid`                  | Updates invoice to paid             |
+| `invoice.finalized`             | Upserts invoice record              |
+| `invoice.updated`               | Mirrors invoice metadata changes    |
+| `invoice.paid`                  | Upserts invoice as paid             |
 | `invoice.payment_failed`        | Marks invoice as failed             |
 | `checkout.session.completed`    | Handles completed checkout sessions |
 
@@ -371,6 +393,7 @@ The component creates these tables in its namespace:
 | `created`              | number  | Created timestamp |
 | `userId`               | string? | Linked user ID    |
 | `orgId`                | string? | Linked org ID     |
+| `metadata`             | object? | Invoice metadata  |
 
 ## Example App
 

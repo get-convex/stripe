@@ -48,6 +48,13 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
         null,
         Name
       >;
+      handleCustomerDeleted: FunctionReference<
+        "mutation",
+        "internal",
+        { stripeCustomerId: string },
+        null,
+        Name
+      >;
       handleCustomerUpdated: FunctionReference<
         "mutation",
         "internal",
@@ -67,6 +74,7 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
           amountDue: number;
           amountPaid: number;
           created: number;
+          metadata?: any;
           status: string;
           stripeCustomerId: string;
           stripeInvoiceId: string;
@@ -144,6 +152,7 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
           priceId?: string;
           quantity?: number;
           status: string;
+          stripeCustomerId?: string;
           stripeSubscriptionId: string;
         },
         null,
@@ -317,6 +326,7 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
           amountDue: number;
           amountPaid: number;
           created: number;
+          metadata?: any;
           orgId?: string;
           status: string;
           stripeCustomerId: string;
@@ -334,6 +344,7 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
           amountDue: number;
           amountPaid: number;
           created: number;
+          metadata?: any;
           orgId?: string;
           status: string;
           stripeCustomerId: string;
@@ -351,6 +362,7 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
           amountDue: number;
           amountPaid: number;
           created: number;
+          metadata?: any;
           orgId?: string;
           status: string;
           stripeCustomerId: string;
