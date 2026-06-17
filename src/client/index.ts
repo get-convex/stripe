@@ -6,15 +6,17 @@ import type {
   HttpRouter,
   RegisterRoutesConfig,
   StripeEventHandlers,
+  StripeApiVersion,
 } from "./types.js";
 import type { ComponentApi } from "../component/_generated/component.js";
 
-/**
- * Time window (in seconds) to check for recent subscriptions when processing
- * payment_intent.succeeded events. This helps avoid creating duplicate payment
- * records for subscription payments.
- */
-const RECENT_SUBSCRIPTION_WINDOW_SECONDS = 10 * 60; // 10 minutes
+type StripeClientConfig = ConstructorParameters<typeof StripeSDK>[1];
+type StripeClientConfigWithApiVersion = Omit<
+  NonNullable<StripeClientConfig>,
+  "apiVersion"
+> & {
+  apiVersion?: StripeApiVersion;
+};
 
 export type StripeComponent = ComponentApi;
 
@@ -28,19 +30,28 @@ export type { RegisterRoutesConfig, StripeEventHandlers };
  */
 export class StripeSubscriptions {
   private _apiKey: string;
+  private _stripeConfig: StripeClientConfigWithApiVersion | undefined;
   constructor(
     public component: StripeComponent,
     options?: {
       STRIPE_SECRET_KEY?: string;
+      apiVersion?: StripeApiVersion;
     },
   ) {
     this._apiKey = options?.STRIPE_SECRET_KEY ?? process.env.STRIPE_SECRET_KEY!;
+    this._stripeConfig = options?.apiVersion
+      ? { apiVersion: options.apiVersion }
+      : undefined;
   }
   get apiKey() {
     if (!this._apiKey) {
       throw new Error("STRIPE_SECRET_KEY environment variable is not set");
     }
     return this._apiKey;
+  }
+
+  private stripe() {
+    return new StripeSDK(this.apiKey, this._stripeConfig as StripeClientConfig);
   }
 
   /**
@@ -54,7 +65,7 @@ export class StripeSubscriptions {
       quantity: number;
     },
   ) {
-    const stripe = new StripeSDK(this.apiKey);
+    const stripe = this.stripe();
     const subscription = await stripe.subscriptions.retrieve(
       args.stripeSubscriptionId,
     );
@@ -86,7 +97,7 @@ export class StripeSubscriptions {
       cancelAtPeriodEnd?: boolean;
     },
   ) {
-    const stripe = new StripeSDK(this.apiKey);
+    const stripe = this.stripe();
     const cancelAtPeriodEnd = args.cancelAtPeriodEnd ?? true;
 
     let subscription: StripeSDK.Subscription;
@@ -108,6 +119,7 @@ export class StripeSubscriptions {
     const item = subscription.items.data[0];
     await ctx.runMutation(this.component.private.handleSubscriptionUpdated, {
       stripeSubscriptionId: subscription.id,
+      stripeCustomerId: getStripeObjectId(subscription.customer),
       status: subscription.status,
       currentPeriodEnd: item?.current_period_end || 0,
       cancelAtPeriodEnd: subscription.cancel_at_period_end ?? false,
@@ -130,7 +142,7 @@ export class StripeSubscriptions {
       stripeSubscriptionId: string;
     },
   ) {
-    const stripe = new StripeSDK(this.apiKey);
+    const stripe = this.stripe();
 
     // Reactivate by setting cancel_at_period_end to false
     const subscription = await stripe.subscriptions.update(
@@ -144,6 +156,7 @@ export class StripeSubscriptions {
     const item = subscription.items.data[0];
     await ctx.runMutation(this.component.private.handleSubscriptionUpdated, {
       stripeSubscriptionId: subscription.id,
+      stripeCustomerId: getStripeObjectId(subscription.customer),
       status: subscription.status,
       currentPeriodEnd: item?.current_period_end || 0,
       cancelAtPeriodEnd: subscription.cancel_at_period_end ?? false,
@@ -162,6 +175,10 @@ export class StripeSubscriptions {
 
   /**
    * Create a Stripe Checkout session for one-time payments or subscriptions.
+   *
+   * Use `params` to pass additional Stripe Checkout Session parameters directly
+   * to the Stripe API. Values in `params` override constructed defaults except
+   * `mode`, which remains controlled by the top-level argument.
    */
   async createCheckoutSession(
     ctx: ActionCtx,
@@ -177,9 +194,11 @@ export class StripeSubscriptions {
       subscriptionMetadata?: Record<string, string>;
       /** Metadata to attach to the payment intent (only for mode: "payment") */
       paymentIntentMetadata?: Record<string, string>;
+      /** Additional Stripe Checkout Session parameters passed through to the API */
+      params?: Partial<StripeSDK.Checkout.SessionCreateParams>;
     },
   ) {
-    const stripe = new StripeSDK(this.apiKey);
+    const stripe = this.stripe();
 
     const sessionParams: StripeSDK.Checkout.SessionCreateParams = {
       mode: args.mode,
@@ -212,7 +231,37 @@ export class StripeSubscriptions {
       };
     }
 
-    const session = await stripe.checkout.sessions.create(sessionParams);
+    const { mode: _mode, ...paramsOverrides } = args.params || {};
+    const finalParams: StripeSDK.Checkout.SessionCreateParams = {
+      ...sessionParams,
+      ...paramsOverrides,
+    };
+    if (sessionParams.subscription_data || paramsOverrides.subscription_data) {
+      finalParams.subscription_data = {
+        ...sessionParams.subscription_data,
+        ...paramsOverrides.subscription_data,
+        metadata: {
+          ...(paramsOverrides.subscription_data?.metadata ?? {}),
+          ...(sessionParams.subscription_data?.metadata ?? {}),
+        },
+      };
+    }
+    if (sessionParams.payment_intent_data || paramsOverrides.payment_intent_data) {
+      finalParams.payment_intent_data = {
+        ...sessionParams.payment_intent_data,
+        ...paramsOverrides.payment_intent_data,
+        metadata: {
+          ...(paramsOverrides.payment_intent_data?.metadata ?? {}),
+          ...(sessionParams.payment_intent_data?.metadata ?? {}),
+        },
+      };
+    }
+    if (isNonHostedCheckoutUiMode(finalParams.ui_mode)) {
+      delete finalParams.success_url;
+      delete finalParams.cancel_url;
+    }
+
+    const session = await stripe.checkout.sessions.create(finalParams);
 
     return {
       sessionId: session.id,
@@ -236,7 +285,7 @@ export class StripeSubscriptions {
       idempotencyKey?: string;
     },
   ) {
-    const stripe = new StripeSDK(this.apiKey);
+    const stripe = this.stripe();
 
     // Use idempotency key to prevent duplicate customers from race conditions
     const requestOptions = args.idempotencyKey
@@ -344,7 +393,7 @@ export class StripeSubscriptions {
       returnUrl: string;
     },
   ) {
-    const stripe = new StripeSDK(this.apiKey);
+    const stripe = this.stripe();
 
     const session = await stripe.billingPortal.sessions.create({
       customer: args.customerId,
@@ -425,7 +474,12 @@ export function registerRoutes(
         });
       }
 
-      const stripe = new StripeSDK(apiKey);
+      const stripe = new StripeSDK(
+        apiKey,
+        config?.apiVersion
+          ? ({ apiVersion: config.apiVersion } as StripeClientConfig)
+          : undefined,
+      );
 
       // Verify webhook signature
       let event: StripeSDK.Event;
@@ -477,7 +531,7 @@ export function registerRoutes(
  * Internal method to process Stripe webhook events with default handling.
  * This handles the database syncing for all supported event types.
  */
-async function processEvent(
+export async function processEvent(
   ctx: MutationCtx | ActionCtx,
   component: ComponentApi,
   event: StripeSDK.Event,
@@ -497,6 +551,14 @@ async function processEvent(
         email: customer.email || undefined,
         name: customer.name || undefined,
         metadata: customer.metadata,
+      });
+      break;
+    }
+
+    case "customer.deleted": {
+      const customer = event.data.object as StripeSDK.Customer;
+      await ctx.runMutation(component.private.handleCustomerDeleted, {
+        stripeCustomerId: customer.id,
       });
       break;
     }
@@ -525,6 +587,7 @@ async function processEvent(
 
       await ctx.runMutation(component.private.handleSubscriptionUpdated, {
         stripeSubscriptionId: subscription.id,
+        stripeCustomerId: subscription.customer as string,
         status: subscription.status,
         currentPeriodEnd: item?.current_period_end || 0,
         cancelAtPeriodEnd: subscription.cancel_at_period_end ?? false,
@@ -589,6 +652,7 @@ async function processEvent(
               amountDue: invoice.amount_due,
               amountPaid: invoice.amount_paid,
               created: invoice.created,
+              metadata: getInvoiceMetadata(invoice),
             });
           }
         } catch (err) {
@@ -599,28 +663,20 @@ async function processEvent(
     }
 
     case "invoice.created":
-    case "invoice.finalized": {
+    case "invoice.finalized":
+    case "invoice.updated":
+    case "invoice.paid":
+    case "invoice.payment_succeeded": {
       const invoice = event.data.object as StripeSDK.Invoice;
       await ctx.runMutation(component.private.handleInvoiceCreated, {
         stripeInvoiceId: invoice.id,
         stripeCustomerId: invoice.customer as string,
-        stripeSubscriptionId: (invoice as any).subscription as
-          | string
-          | undefined,
+        stripeSubscriptionId: getInvoiceSubscriptionId(invoice),
         status: invoice.status || "open",
         amountDue: invoice.amount_due,
         amountPaid: invoice.amount_paid,
         created: invoice.created,
-      });
-      break;
-    }
-
-    case "invoice.paid":
-    case "invoice.payment_succeeded": {
-      const invoice = event.data.object as any;
-      await ctx.runMutation(component.private.handleInvoicePaid, {
-        stripeInvoiceId: invoice.id,
-        amountPaid: invoice.amount_paid,
+        metadata: getInvoiceMetadata(invoice),
       });
       break;
     }
@@ -642,7 +698,7 @@ async function processEvent(
           const invoice = await stripe.invoices.retrieve(
             paymentIntent.invoice as string,
           );
-          if ((invoice as any).subscription) {
+          if (getInvoiceSubscriptionId(invoice)) {
             console.log(
               "⏭️ Skipping payment_intent.succeeded - subscription payment",
             );
@@ -650,29 +706,6 @@ async function processEvent(
           }
         } catch (err) {
           console.error("Error checking invoice:", err);
-        }
-      }
-
-      // Check for recent subscriptions
-      if (paymentIntent.customer) {
-        const recentSubscriptions = await ctx.runQuery(
-          component.private.listSubscriptionsWithCreationTime,
-          {
-            stripeCustomerId: paymentIntent.customer as string,
-          },
-        );
-
-        const recentWindowStartMs =
-          Date.now() - RECENT_SUBSCRIPTION_WINDOW_SECONDS * 1000;
-        const recentSubscription = recentSubscriptions.find(
-          (sub) => sub._creationTime > recentWindowStartMs,
-        );
-
-        if (recentSubscription) {
-          console.log(
-            "⏭️ Skipping payment_intent.succeeded - recent subscription",
-          );
-          break;
         }
       }
 
@@ -693,6 +726,48 @@ async function processEvent(
     default:
       console.log(`ℹ️ Unhandled event type: ${event.type}`);
   }
+}
+
+function getInvoiceSubscriptionId(invoice: StripeSDK.Invoice) {
+  const parentSubscription = invoice.parent?.subscription_details?.subscription;
+  if (typeof parentSubscription === "string") {
+    return parentSubscription;
+  }
+  if (parentSubscription && "id" in parentSubscription) {
+    return parentSubscription.id;
+  }
+
+  const legacySubscription = (
+    invoice as StripeSDK.Invoice & {
+      subscription?: string | StripeSDK.Subscription | null;
+    }
+  ).subscription;
+  if (typeof legacySubscription === "string") {
+    return legacySubscription;
+  }
+  if (legacySubscription && "id" in legacySubscription) {
+    return legacySubscription.id;
+  }
+  return undefined;
+}
+
+function getStripeObjectId(object: string | { id: string }) {
+  return typeof object === "string" ? object : object.id;
+}
+
+function getInvoiceMetadata(invoice: StripeSDK.Invoice) {
+  const invoiceMetadata = invoice.metadata || {};
+  if (Object.keys(invoiceMetadata).length > 0) {
+    return invoiceMetadata;
+  }
+  return invoice.parent?.subscription_details?.metadata || {};
+}
+
+function isNonHostedCheckoutUiMode(
+  uiMode: StripeSDK.Checkout.SessionCreateParams.UiMode | undefined,
+) {
+  const value = uiMode as string | undefined;
+  return value !== undefined && value !== "hosted_page" && value !== "hosted";
 }
 
 export default StripeSubscriptions;

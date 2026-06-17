@@ -1,21 +1,35 @@
 import { describe, expect, test, vi } from "vitest";
+import StripeSDK from "stripe";
+import * as clientModule from "./index.js";
 import { StripeSubscriptions, registerRoutes } from "./index.js";
 import { components } from "./setup.test.js";
 
 const stripeMocks = vi.hoisted(() => ({
   retrieveSubscription: vi.fn(),
+  updateSubscription: vi.fn(),
+  cancelSubscription: vi.fn(),
   updateSubscriptionItem: vi.fn(),
+  createCheckoutSession: vi.fn(),
 }));
 
 vi.mock("stripe", () => ({
-  default: vi.fn().mockImplementation(() => ({
-    subscriptions: {
-      retrieve: stripeMocks.retrieveSubscription,
-    },
-    subscriptionItems: {
-      update: stripeMocks.updateSubscriptionItem,
-    },
-  })),
+  default: vi.fn().mockImplementation(function StripeMock() {
+    return {
+      subscriptions: {
+        retrieve: stripeMocks.retrieveSubscription,
+        update: stripeMocks.updateSubscription,
+        cancel: stripeMocks.cancelSubscription,
+      },
+      subscriptionItems: {
+        update: stripeMocks.updateSubscriptionItem,
+      },
+      checkout: {
+        sessions: {
+          create: stripeMocks.createCheckoutSession,
+        },
+      },
+    };
+  }),
 }));
 
 describe("StripeSubscriptions client", () => {
@@ -32,6 +46,37 @@ describe("StripeSubscriptions client", () => {
     expect(client).toBeDefined();
     // The apiKey getter should return the provided key
     expect(client.apiKey).toBe("sk_test_123");
+  });
+
+  test("should pass Stripe client configuration options to the SDK", async () => {
+    vi.mocked(StripeSDK).mockClear();
+    stripeMocks.createCheckoutSession.mockResolvedValue({
+      id: "cs_config",
+      url: "https://checkout.stripe.com/c/pay/cs_config",
+    });
+
+    const client = new StripeSubscriptions(components.stripe, {
+      STRIPE_SECRET_KEY: "sk_test_123",
+      apiVersion: "2026-04-22.dahlia",
+    });
+
+    await client.createCheckoutSession(
+      {
+        runAction: vi.fn(),
+        runMutation: vi.fn(),
+        runQuery: vi.fn(),
+      },
+      {
+        priceId: "price_123",
+        mode: "payment",
+        successUrl: "https://example.com/success",
+        cancelUrl: "https://example.com/cancel",
+      },
+    );
+
+    expect(StripeSDK).toHaveBeenCalledWith("sk_test_123", {
+      apiVersion: "2026-04-22.dahlia",
+    });
   });
 
   test("should throw error when accessing apiKey without key set", async () => {
@@ -85,10 +130,411 @@ describe("StripeSubscriptions client", () => {
     );
     expect(ctx.runAction).not.toHaveBeenCalled();
   });
+
+  test("cancelSubscription includes customer ID when syncing subscription", async () => {
+    stripeMocks.updateSubscription.mockResolvedValue({
+      id: "sub_cancel",
+      customer: "cus_cancel",
+      status: "active",
+      cancel_at_period_end: true,
+      cancel_at: 1_800_000_000,
+      metadata: { userId: "user_cancel" },
+      items: {
+        data: [
+          {
+            current_period_end: 1_800_000_000,
+            quantity: 3,
+            price: { id: "price_cancel" },
+          },
+        ],
+      },
+    });
+
+    const ctx = {
+      runAction: vi.fn(),
+      runMutation: vi.fn().mockResolvedValue(null),
+      runQuery: vi.fn(),
+    };
+    const client = new StripeSubscriptions(components.stripe, {
+      STRIPE_SECRET_KEY: "sk_test_123",
+    });
+
+    await client.cancelSubscription(ctx, {
+      stripeSubscriptionId: "sub_cancel",
+      cancelAtPeriodEnd: true,
+    });
+
+    expect(ctx.runMutation).toHaveBeenCalledWith(
+      components.stripe.private.handleSubscriptionUpdated,
+      expect.any(Object),
+    );
+    expect(ctx.runMutation.mock.calls[0][1]).toMatchObject({
+      stripeSubscriptionId: "sub_cancel",
+      stripeCustomerId: "cus_cancel",
+      priceId: "price_cancel",
+    });
+  });
+
+  test("reactivateSubscription includes customer ID when syncing subscription", async () => {
+    stripeMocks.updateSubscription.mockResolvedValue({
+      id: "sub_reactivate",
+      customer: "cus_reactivate",
+      status: "active",
+      cancel_at_period_end: false,
+      cancel_at: null,
+      metadata: { userId: "user_reactivate" },
+      items: {
+        data: [
+          {
+            current_period_end: 1_800_000_000,
+            quantity: 2,
+            price: { id: "price_reactivate" },
+          },
+        ],
+      },
+    });
+
+    const ctx = {
+      runAction: vi.fn(),
+      runMutation: vi.fn().mockResolvedValue(null),
+      runQuery: vi.fn(),
+    };
+    const client = new StripeSubscriptions(components.stripe, {
+      STRIPE_SECRET_KEY: "sk_test_123",
+    });
+
+    await client.reactivateSubscription(ctx, {
+      stripeSubscriptionId: "sub_reactivate",
+    });
+
+    expect(ctx.runMutation).toHaveBeenCalledWith(
+      components.stripe.private.handleSubscriptionUpdated,
+      expect.any(Object),
+    );
+    expect(ctx.runMutation.mock.calls[0][1]).toMatchObject({
+      stripeSubscriptionId: "sub_reactivate",
+      stripeCustomerId: "cus_reactivate",
+      priceId: "price_reactivate",
+    });
+  });
+
+  test("passes additional checkout session params without allowing mode override", async () => {
+    stripeMocks.createCheckoutSession.mockResolvedValue({
+      id: "cs_test_123",
+      url: "https://checkout.stripe.com/c/pay/cs_test_123",
+    });
+
+    const client = new StripeSubscriptions(components.stripe, {
+      STRIPE_SECRET_KEY: "sk_test_123",
+    });
+
+    const result = await client.createCheckoutSession(
+      {
+        runAction: vi.fn(),
+        runMutation: vi.fn(),
+        runQuery: vi.fn(),
+      },
+      {
+        priceId: "price_monthly",
+        customerId: "cus_123",
+        mode: "subscription",
+        successUrl: "https://example.com/success",
+        cancelUrl: "https://example.com/cancel",
+        quantity: 2,
+        metadata: { source: "test" },
+        subscriptionMetadata: { userId: "user_123" },
+        params: {
+          mode: "payment",
+          allow_promotion_codes: true,
+          line_items: [{ price: "price_override", quantity: 5 }],
+        },
+      },
+    );
+
+    expect(stripeMocks.createCheckoutSession).toHaveBeenCalledWith({
+      mode: "subscription",
+      line_items: [{ price: "price_override", quantity: 5 }],
+      success_url: "https://example.com/success",
+      cancel_url: "https://example.com/cancel",
+      metadata: { source: "test" },
+      customer: "cus_123",
+      subscription_data: { metadata: { userId: "user_123" } },
+      allow_promotion_codes: true,
+    });
+    expect(result).toEqual({
+      sessionId: "cs_test_123",
+      url: "https://checkout.stripe.com/c/pay/cs_test_123",
+    });
+  });
+
+  test("merges checkout params metadata without dropping linkage metadata", async () => {
+    stripeMocks.createCheckoutSession.mockResolvedValue({
+      id: "cs_metadata_merge",
+      url: "https://checkout.stripe.com/c/pay/cs_metadata_merge",
+    });
+
+    const client = new StripeSubscriptions(components.stripe, {
+      STRIPE_SECRET_KEY: "sk_test_123",
+    });
+
+    await client.createCheckoutSession(
+      {
+        runAction: vi.fn(),
+        runMutation: vi.fn(),
+        runQuery: vi.fn(),
+      },
+      {
+        priceId: "price_monthly",
+        mode: "subscription",
+        successUrl: "https://example.com/success",
+        cancelUrl: "https://example.com/cancel",
+        subscriptionMetadata: { userId: "user_123" },
+        params: {
+          subscription_data: {
+            metadata: { couponSource: "landing_page" },
+            trial_period_days: 14,
+          },
+        },
+      },
+    );
+
+    expect(stripeMocks.createCheckoutSession).toHaveBeenCalledWith(
+      expect.objectContaining({
+        subscription_data: {
+          metadata: {
+            couponSource: "landing_page",
+            userId: "user_123",
+          },
+          trial_period_days: 14,
+        },
+      }),
+    );
+
+    stripeMocks.createCheckoutSession.mockClear();
+    stripeMocks.createCheckoutSession.mockResolvedValue({
+      id: "cs_payment_metadata_merge",
+      url: "https://checkout.stripe.com/c/pay/cs_payment_metadata_merge",
+    });
+
+    await client.createCheckoutSession(
+      {
+        runAction: vi.fn(),
+        runMutation: vi.fn(),
+        runQuery: vi.fn(),
+      },
+      {
+        priceId: "price_one_time",
+        mode: "payment",
+        successUrl: "https://example.com/success",
+        cancelUrl: "https://example.com/cancel",
+        paymentIntentMetadata: { userId: "user_456" },
+        params: {
+          payment_intent_data: {
+            metadata: { productType: "hat" },
+            statement_descriptor: "BENJI HAT",
+          },
+        },
+      },
+    );
+
+    expect(stripeMocks.createCheckoutSession).toHaveBeenCalledWith(
+      expect.objectContaining({
+        payment_intent_data: {
+          metadata: {
+            productType: "hat",
+            userId: "user_456",
+          },
+          statement_descriptor: "BENJI HAT",
+        },
+      }),
+    );
+  });
+
+  test("omits hosted redirect URLs for non-hosted checkout ui modes", async () => {
+    stripeMocks.createCheckoutSession.mockResolvedValue({
+      id: "cs_embedded",
+      url: null,
+    });
+
+    const client = new StripeSubscriptions(components.stripe, {
+      STRIPE_SECRET_KEY: "sk_test_123",
+    });
+
+    await client.createCheckoutSession(
+      {
+        runAction: vi.fn(),
+        runMutation: vi.fn(),
+        runQuery: vi.fn(),
+      },
+      {
+        priceId: "price_monthly",
+        mode: "subscription",
+        successUrl: "https://example.com/success",
+        cancelUrl: "https://example.com/cancel",
+        params: {
+          ui_mode: "embedded_page",
+          return_url: "https://example.com/return",
+        },
+      },
+    );
+
+    expect(stripeMocks.createCheckoutSession).toHaveBeenCalledWith({
+      mode: "subscription",
+      line_items: [{ price: "price_monthly", quantity: 1 }],
+      metadata: {},
+      ui_mode: "embedded_page",
+      return_url: "https://example.com/return",
+    });
+  });
+
+  test("keeps redirect URLs for legacy hosted checkout ui mode", async () => {
+    stripeMocks.createCheckoutSession.mockResolvedValue({
+      id: "cs_hosted",
+      url: "https://checkout.stripe.com/c/pay/cs_hosted",
+    });
+
+    const client = new StripeSubscriptions(components.stripe, {
+      STRIPE_SECRET_KEY: "sk_test_123",
+    });
+
+    await client.createCheckoutSession(
+      {
+        runAction: vi.fn(),
+        runMutation: vi.fn(),
+        runQuery: vi.fn(),
+      },
+      {
+        priceId: "price_monthly",
+        mode: "subscription",
+        successUrl: "https://example.com/success",
+        cancelUrl: "https://example.com/cancel",
+        params: {
+          ui_mode: "hosted" as any,
+        },
+      },
+    );
+
+    expect(stripeMocks.createCheckoutSession).toHaveBeenCalledWith({
+      mode: "subscription",
+      line_items: [{ price: "price_monthly", quantity: 1 }],
+      success_url: "https://example.com/success",
+      cancel_url: "https://example.com/cancel",
+      metadata: {},
+      ui_mode: "hosted",
+    });
+  });
 });
 
 describe("registerRoutes", () => {
   test("registerRoutes function should be exported", () => {
     expect(typeof registerRoutes).toBe("function");
+  });
+});
+
+describe("processEvent", () => {
+  test("records one-time payments even when the customer recently subscribed", async () => {
+    const processEvent = (clientModule as any).processEvent;
+    const ctx = {
+      runMutation: vi.fn().mockResolvedValue(null),
+      runQuery: vi.fn().mockResolvedValue([
+        {
+          _creationTime: Date.now(),
+          stripeSubscriptionId: "sub_recent",
+          stripeCustomerId: "cus_recent",
+          status: "active",
+        },
+      ]),
+    };
+
+    await processEvent(
+      ctx,
+      components.stripe,
+      {
+        type: "payment_intent.succeeded",
+        data: {
+          object: {
+            id: "pi_one_time_after_sub",
+            customer: "cus_recent",
+            amount: 4900,
+            currency: "usd",
+            status: "succeeded",
+            created: 1_700_000_123,
+            metadata: { userId: "user_recent" },
+          },
+        },
+      },
+      {
+        invoices: {
+          retrieve: vi.fn(),
+        },
+      },
+    );
+
+    expect(ctx.runMutation).toHaveBeenCalledWith(
+      components.stripe.private.handlePaymentIntentSucceeded,
+      {
+        stripePaymentIntentId: "pi_one_time_after_sub",
+        stripeCustomerId: "cus_recent",
+        amount: 4900,
+        currency: "usd",
+        status: "succeeded",
+        created: 1_700_000_123,
+        metadata: { userId: "user_recent" },
+      },
+    );
+  });
+
+  test("links v22 invoice events through parent subscription details", async () => {
+    const processEvent = (clientModule as any).processEvent;
+    const ctx = {
+      runMutation: vi.fn().mockResolvedValue(null),
+      runQuery: vi.fn(),
+    };
+
+    await processEvent(
+      ctx,
+      components.stripe,
+      {
+        type: "invoice.updated",
+        data: {
+          object: {
+            id: "in_v22",
+            customer: "cus_v22",
+            status: "open",
+            amount_due: 1234,
+            amount_paid: 0,
+            created: 1_700_000_001,
+            metadata: {},
+            parent: {
+              subscription_details: {
+                subscription: "sub_v22",
+                metadata: {
+                  userId: "user_v22",
+                  orgId: "org_v22",
+                },
+              },
+            },
+          },
+        },
+      },
+      {},
+    );
+
+    expect(ctx.runMutation).toHaveBeenCalledWith(
+      components.stripe.private.handleInvoiceCreated,
+      {
+        stripeInvoiceId: "in_v22",
+        stripeCustomerId: "cus_v22",
+        stripeSubscriptionId: "sub_v22",
+        status: "open",
+        amountDue: 1234,
+        amountPaid: 0,
+        created: 1_700_000_001,
+        metadata: {
+          userId: "user_v22",
+          orgId: "org_v22",
+        },
+      },
+    );
   });
 });
