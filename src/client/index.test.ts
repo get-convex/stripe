@@ -303,6 +303,43 @@ describe("StripeSubscriptions client", () => {
       return_url: "https://example.com/return",
     });
   });
+
+  test("keeps redirect URLs for legacy hosted checkout ui mode", async () => {
+    stripeMocks.createCheckoutSession.mockResolvedValue({
+      id: "cs_hosted",
+      url: "https://checkout.stripe.com/c/pay/cs_hosted",
+    });
+
+    const client = new StripeSubscriptions(components.stripe, {
+      STRIPE_SECRET_KEY: "sk_test_123",
+    });
+
+    await client.createCheckoutSession(
+      {
+        runAction: vi.fn(),
+        runMutation: vi.fn(),
+        runQuery: vi.fn(),
+      },
+      {
+        priceId: "price_monthly",
+        mode: "subscription",
+        successUrl: "https://example.com/success",
+        cancelUrl: "https://example.com/cancel",
+        params: {
+          ui_mode: "hosted" as any,
+        },
+      },
+    );
+
+    expect(stripeMocks.createCheckoutSession).toHaveBeenCalledWith({
+      mode: "subscription",
+      line_items: [{ price: "price_monthly", quantity: 1 }],
+      success_url: "https://example.com/success",
+      cancel_url: "https://example.com/cancel",
+      metadata: {},
+      ui_mode: "hosted",
+    });
+  });
 });
 
 describe("registerRoutes", () => {

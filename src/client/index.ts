@@ -240,7 +240,7 @@ export class StripeSubscriptions {
 
     const { mode: _mode, ...paramsOverrides } = args.params || {};
     const finalParams = { ...sessionParams, ...paramsOverrides };
-    if (finalParams.ui_mode && finalParams.ui_mode !== "hosted_page") {
+    if (isNonHostedCheckoutUiMode(finalParams.ui_mode)) {
       delete finalParams.success_url;
       delete finalParams.cancel_url;
     }
@@ -768,6 +768,13 @@ function getInvoiceMetadata(invoice: StripeSDK.Invoice) {
     return invoiceMetadata;
   }
   return invoice.parent?.subscription_details?.metadata || {};
+}
+
+function isNonHostedCheckoutUiMode(
+  uiMode: StripeSDK.Checkout.SessionCreateParams.UiMode | undefined,
+) {
+  const value = uiMode as string | undefined;
+  return value !== undefined && value !== "hosted_page" && value !== "hosted";
 }
 
 export default StripeSubscriptions;
