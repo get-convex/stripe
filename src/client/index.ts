@@ -18,13 +18,6 @@ type StripeClientConfigWithApiVersion = Omit<
   apiVersion?: StripeApiVersion;
 };
 
-/**
- * Time window (in seconds) to check for recent subscriptions when processing
- * payment_intent.succeeded events. This helps avoid creating duplicate payment
- * records for subscription payments.
- */
-const RECENT_SUBSCRIPTION_WINDOW_SECONDS = 10 * 60; // 10 minutes
-
 export type StripeComponent = ComponentApi;
 
 export type { RegisterRoutesConfig, StripeEventHandlers };
@@ -690,29 +683,6 @@ export async function processEvent(
           }
         } catch (err) {
           console.error("Error checking invoice:", err);
-        }
-      }
-
-      // Check for recent subscriptions
-      if (paymentIntent.customer) {
-        const recentSubscriptions = await ctx.runQuery(
-          component.private.listSubscriptionsWithCreationTime,
-          {
-            stripeCustomerId: paymentIntent.customer as string,
-          },
-        );
-
-        const recentWindowStartMs =
-          Date.now() - RECENT_SUBSCRIPTION_WINDOW_SECONDS * 1000;
-        const recentSubscription = recentSubscriptions.find(
-          (sub) => sub._creationTime > recentWindowStartMs,
-        );
-
-        if (recentSubscription) {
-          console.log(
-            "⏭️ Skipping payment_intent.succeeded - recent subscription",
-          );
-          break;
         }
       }
 

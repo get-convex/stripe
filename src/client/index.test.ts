@@ -349,6 +349,58 @@ describe("registerRoutes", () => {
 });
 
 describe("processEvent", () => {
+  test("records one-time payments even when the customer recently subscribed", async () => {
+    const processEvent = (clientModule as any).processEvent;
+    const ctx = {
+      runMutation: vi.fn().mockResolvedValue(null),
+      runQuery: vi.fn().mockResolvedValue([
+        {
+          _creationTime: Date.now(),
+          stripeSubscriptionId: "sub_recent",
+          stripeCustomerId: "cus_recent",
+          status: "active",
+        },
+      ]),
+    };
+
+    await processEvent(
+      ctx,
+      components.stripe,
+      {
+        type: "payment_intent.succeeded",
+        data: {
+          object: {
+            id: "pi_one_time_after_sub",
+            customer: "cus_recent",
+            amount: 4900,
+            currency: "usd",
+            status: "succeeded",
+            created: 1_700_000_123,
+            metadata: { userId: "user_recent" },
+          },
+        },
+      },
+      {
+        invoices: {
+          retrieve: vi.fn(),
+        },
+      },
+    );
+
+    expect(ctx.runMutation).toHaveBeenCalledWith(
+      components.stripe.private.handlePaymentIntentSucceeded,
+      {
+        stripePaymentIntentId: "pi_one_time_after_sub",
+        stripeCustomerId: "cus_recent",
+        amount: 4900,
+        currency: "usd",
+        status: "succeeded",
+        created: 1_700_000_123,
+        metadata: { userId: "user_recent" },
+      },
+    );
+  });
+
   test("links v22 invoice events through parent subscription details", async () => {
     const processEvent = (clientModule as any).processEvent;
     const ctx = {
