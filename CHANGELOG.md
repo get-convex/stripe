@@ -3,10 +3,15 @@
 ## 0.1.5
 
 - Upgrade Stripe Node SDK support to v22.2.1 and document Node.js >=18.
-- Add optional `apiVersion` configuration for `StripeSubscriptions` and webhook route registration.
-- Add a typed Checkout Session `params` passthrough while keeping the top-level `mode` authoritative.
-- Improve webhook robustness for customer deletion, subscription update upserts, invoice upserts, v22 invoice parent metadata, metadata mirroring, and out-of-order invoice status handling.
-- Preserve current lint/codegen/workflow dependency hygiene and clear reported npm audit vulnerabilities.
+- Add optional `apiVersion` configuration for `StripeSubscriptions` and webhook
+  route registration.
+- Add a typed Checkout Session `params` passthrough while keeping the top-level
+  `mode` authoritative.
+- Improve webhook robustness for customer deletion, subscription update upserts,
+  invoice upserts, v22 invoice parent metadata, metadata mirroring, and
+  out-of-order invoice status handling.
+- Preserve current lint/codegen/workflow dependency hygiene and clear reported
+  npm audit vulnerabilities.
 
 ## 0.1.4
 
