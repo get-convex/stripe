@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.1.5
 
 - Upgrade Stripe Node SDK support to v22.2.1 and document Node.js >=18.
 - Add optional `apiVersion` configuration for `StripeSubscriptions` and webhook route registration.
