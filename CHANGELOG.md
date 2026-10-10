@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.7
+
+- Adds a /test entrypoint for testing, compatibile with convex-test's new
+  `defineTestApp` capability.
+
 ## 0.1.5
 
 - Upgrade Stripe Node SDK support to v22.2.1 and document Node.js >=18.
